@@ -110,6 +110,7 @@ function Index() {
   const [openTranscript, setOpenTranscript] = useState<Record<string, boolean>>({});
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [pending, setPending] = useState<{ duration: number } | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -117,6 +118,8 @@ function Index() {
   const pcmRef = useRef<Float32Array[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const syncedRef = useRef<Record<string, string>>({});
+  const elapsedBaseRef = useRef(0);
+  const pendingRef = useRef<{ chunks: Float32Array[]; sampleRate: number } | null>(null);
 
   useEffect(() => {
     try {
