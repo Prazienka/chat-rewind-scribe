@@ -481,7 +481,7 @@ function Index() {
       const source = ctx.createMediaStreamSource(stream);
       const node = ctx.createScriptProcessor(4096, 1, 1);
       nodeRef.current = node;
-      pcmRef.current = [];
+      pcmRef.current = resume ? (pendingRef.current?.chunks ?? []) : [];
       node.onaudioprocess = (e) => {
         const data = e.inputBuffer.getChannelData(0);
         pcmRef.current.push(new Float32Array(data));
@@ -491,7 +491,8 @@ function Index() {
       };
       source.connect(node);
       node.connect(ctx.destination);
-      setElapsed(0);
+      if (!resume) elapsedBaseRef.current = 0;
+      setElapsed(elapsedBaseRef.current);
       setIsRecording(true);
     } catch (err) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
