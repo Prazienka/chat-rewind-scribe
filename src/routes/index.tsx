@@ -28,8 +28,9 @@ import {
   CloudUpload,
 } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import {
+  getSupabase,
+  prefetchCloud,
   fetchCloudRecordings,
   upsertCloudRecording,
   deleteCloudRecording,
@@ -38,7 +39,8 @@ import {
   fetchCloudGroups,
   addCloudGroup,
   deleteCloudGroup,
-} from "@/lib/cloud";
+} from "@/lib/cloud-lazy";
+
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
