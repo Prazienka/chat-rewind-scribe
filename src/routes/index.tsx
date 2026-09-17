@@ -270,9 +270,11 @@ function Index() {
   useEffect(() => {
     if (!isRecording) return;
     const started = Date.now();
-    const timer = setInterval(() => setElapsed((Date.now() - started) / 1000), 250);
+    const base = elapsedBaseRef.current;
+    const timer = setInterval(() => setElapsed(base + (Date.now() - started) / 1000), 250);
     return () => clearInterval(timer);
   }, [isRecording]);
+
 
   useEffect(() => {
     const onScroll = () => setShowBack(window.scrollY > 400);
