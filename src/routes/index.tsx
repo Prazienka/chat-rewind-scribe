@@ -358,14 +358,18 @@ function Index() {
     }
 
     const id = crypto.randomUUID();
+    const filename = `nahravka-${new Date().toISOString().slice(0, 16).replace(":", "-")}.wav`;
     const entry: Recording = {
       id,
       createdAt: Date.now(),
       duration: elapsed,
       transcript: "",
       status: "running",
+      hasAudio: true,
+      audioName: filename,
     };
     persist([entry, ...recordings]);
+    void saveAudio(id, blob, filename);
     void transcribe(blob, id);
   }, [elapsed, persist, recordings, transcribe]);
 
@@ -396,6 +400,8 @@ function Index() {
         transcript: "",
         status: "running",
         title: file.name,
+        hasAudio: true,
+        audioName: file.name,
       };
       setRecordings((prev) => {
         const next = [entry, ...prev];
@@ -406,16 +412,53 @@ function Index() {
         }
         return next;
       });
+      void saveAudio(id, file, file.name);
       void transcribe(file, id, file.name);
     },
     [transcribe],
   );
 
-  const remove = (id: string) => persist(recordings.filter((r) => r.id !== id));
+  const remove = (id: string) => {
+    void deleteAudio(id);
+    persist(recordings.filter((r) => r.id !== id));
+  };
 
   const copy = async (text: string) => {
     await navigator.clipboard.writeText(text);
-    toast.success("Přepis zkopírován.");
+    toast.success("Zkopírováno.");
+  };
+
+  const saveBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const baseName = (rec: Recording) =>
+    (rec.title?.replace(/\.[a-z0-9]+$/i, "") || new Date(rec.createdAt).toISOString().slice(0, 16))
+      .replace(/[^\p{L}\p{N}\-_ ]/gu, "")
+      .trim() || "nahravka";
+
+  const exportAudio = async (rec: Recording) => {
+    const stored = await loadAudio(rec.id);
+    if (!stored) {
+      toast.error("Zvukový záznam už není uložený v zařízení.");
+      return;
+    }
+    saveBlob(stored.blob, stored.filename || `${baseName(rec)}.wav`);
+  };
+
+  const exportText = (rec: Recording, kind: "transcript" | "summary") => {
+    const text = kind === "transcript" ? rec.transcript : (rec.summary ?? "");
+    if (!text.trim()) {
+      toast.error(kind === "transcript" ? "Přepis není hotový." : "Shrnutí není hotové.");
+      return;
+    }
+    const header = `${rec.title || "Nahrávka"} · ${new Date(rec.createdAt).toLocaleString("cs-CZ")}\n\n`;
+    saveBlob(new Blob([header + text], { type: "text/plain;charset=utf-8" }), `${baseName(rec)}-${kind === "transcript" ? "prepis" : "shrnuti"}.txt`);
   };
 
   const download = (rec: Recording) => {
