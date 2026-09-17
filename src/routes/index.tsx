@@ -23,8 +23,22 @@ import {
   X,
   Eye,
   EyeOff,
+  LogIn,
+  LogOut,
+  CloudUpload,
 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  fetchCloudRecordings,
+  upsertCloudRecording,
+  deleteCloudRecording,
+  uploadCloudAudio,
+  downloadCloudAudio,
+  fetchCloudGroups,
+  addCloudGroup,
+  deleteCloudGroup,
+} from "@/lib/cloud";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { encodeWav, formatDuration } from "@/lib/wav";
