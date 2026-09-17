@@ -465,7 +465,7 @@ function Index() {
     [language, refine, summarize, update],
   );
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (resume = false) => {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       toast.error("Tento prohlížeč nahrávání nepodporuje. Zkuste Chrome nebo Safari.");
       return;
