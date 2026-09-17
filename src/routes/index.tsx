@@ -530,27 +530,59 @@ function Index() {
     await ctx?.close();
     ctxRef.current = null;
 
-    const blob = encodeWav(chunks, sampleRate);
-    if (blob.size < 2048) {
+    const total = chunks.reduce((sum, c) => sum + c.length, 0);
+    if (total / sampleRate < 0.3) {
       toast.error("Nahrávka byla prázdná – zkuste to prosím znovu.");
+      elapsedBaseRef.current = 0;
+      setElapsed(0);
       return;
     }
 
+    pendingRef.current = { chunks, sampleRate };
+    elapsedBaseRef.current = elapsed;
+    setPending({ duration: elapsed });
+  }, [elapsed]);
+
+  const savePending = useCallback(() => {
+    const held = pendingRef.current;
+    if (!held) return;
+    pendingRef.current = null;
+    setPending(null);
+    const blob = encodeWav(held.chunks, held.sampleRate);
+    const group = filter !== "all" && filter !== "none" ? filter : "";
     const id = crypto.randomUUID();
     const filename = `nahravka-${new Date().toISOString().slice(0, 16).replace(":", "-")}.wav`;
     const entry: Recording = {
       id,
       createdAt: Date.now(),
-      duration: elapsed,
+      duration: elapsedBaseRef.current,
       transcript: "",
       status: "running",
       hasAudio: true,
       audioName: filename,
+      group,
     };
     persist([entry, ...recordings]);
     void storeAudio(id, blob, filename);
     void transcribe(blob, id);
-  }, [elapsed, persist, recordings, storeAudio, transcribe]);
+    elapsedBaseRef.current = 0;
+    setElapsed(0);
+    toast.success(group ? `Uloženo do složky „${group}“.` : "Uloženo mezi nahrávky bez složky.");
+  }, [filter, persist, recordings, storeAudio, transcribe]);
+
+  const continuePending = useCallback(() => {
+    setPending(null);
+    void start(true);
+  }, [start]);
+
+  const discardPending = useCallback(() => {
+    pendingRef.current = null;
+    setPending(null);
+    elapsedBaseRef.current = 0;
+    setElapsed(0);
+    toast("Nahrávka zahozena.");
+  }, []);
+
 
   const importFile = useCallback(
     async (file: File) => {
