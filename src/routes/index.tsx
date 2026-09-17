@@ -133,6 +133,58 @@ function Index() {
     return () => clearInterval(timer);
   }, [isRecording]);
 
+  const refine = useCallback(
+    async (text: string, id: string): Promise<string> => {
+      update(id, { rawTranscript: text, refineStatus: "running" });
+      try {
+        const res = await fetch("/api/refine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, language }),
+        });
+        if (!res.ok || !res.body) {
+          update(id, { refineStatus: "error" });
+          return text;
+        }
+        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = "";
+        let refined = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const event = JSON.parse(payload) as { type?: string; delta?: string };
+              if (event.type === "response.output_text.delta" && event.delta) {
+                refined += event.delta;
+                update(id, { transcript: refined });
+              }
+            } catch {
+              /* ignore malformed event */
+            }
+          }
+        }
+        if (refined.trim().length < Math.min(20, text.length / 4)) {
+          update(id, { transcript: text, refineStatus: "error" });
+          return text;
+        }
+        update(id, { transcript: refined.trim(), refineStatus: "done" });
+        return refined.trim();
+      } catch (err) {
+        console.error(err);
+        update(id, { transcript: text, refineStatus: "error" });
+        return text;
+      }
+    },
+    [language, update],
+  );
+
   const summarize = useCallback(
     async (text: string, id: string) => {
       update(id, { summaryStatus: "running", summary: "", summaryError: "" });
