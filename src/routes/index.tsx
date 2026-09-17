@@ -224,6 +224,7 @@ function Index() {
           update(id, { status: "error", error: "V nahrávce nebyla rozpoznána žádná řeč." });
         } else {
           update(id, { transcript: text, status: "done" });
+          void summarize(text, id);
         }
       } catch (err) {
         console.error(err);
