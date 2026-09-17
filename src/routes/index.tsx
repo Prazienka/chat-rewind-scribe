@@ -16,11 +16,15 @@ import {
   FolderPlus,
   FolderOpen,
   ArrowUp,
+  Music,
+  FileText,
+  WandSparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { encodeWav, formatDuration } from "@/lib/wav";
+import { saveAudio, loadAudio, deleteAudio } from "@/lib/audio-store";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -51,17 +55,21 @@ type Recording = {
   status: "running" | "done" | "error";
   error?: string;
   title?: string;
+  rawTranscript?: string;
+  refineStatus?: "running" | "done" | "error";
   summary?: string;
   summaryStatus?: "running" | "done" | "error";
   summaryError?: string;
   group?: string;
+  hasAudio?: boolean;
+  audioName?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
 const GROUPS_KEY = "zapisnik.groups";
 const LANGS = [
-  { value: "auto", label: "Automaticky" },
   { value: "cs", label: "Čeština" },
+  { value: "auto", label: "Automaticky" },
   { value: "en", label: "Angličtina" },
   { value: "sk", label: "Slovenština" },
   { value: "de", label: "Němčina" },
@@ -71,7 +79,7 @@ function Index() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [language, setLanguage] = useState("auto");
+  const [language, setLanguage] = useState("cs");
   const [level, setLevel] = useState(0);
   const [groups, setGroups] = useState<string[]>([]);
   const [filter, setFilter] = useState("all");
@@ -124,6 +132,65 @@ function Index() {
     const timer = setInterval(() => setElapsed((Date.now() - started) / 1000), 250);
     return () => clearInterval(timer);
   }, [isRecording]);
+
+  useEffect(() => {
+    const onScroll = () => setShowBack(window.scrollY > 400);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const refine = useCallback(
+    async (text: string, id: string): Promise<string> => {
+      update(id, { rawTranscript: text, refineStatus: "running" });
+      try {
+        const res = await fetch("/api/refine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, language }),
+        });
+        if (!res.ok || !res.body) {
+          update(id, { refineStatus: "error" });
+          return text;
+        }
+        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = "";
+        let refined = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const event = JSON.parse(payload) as { type?: string; delta?: string };
+              if (event.type === "response.output_text.delta" && event.delta) {
+                refined += event.delta;
+                update(id, { transcript: refined });
+              }
+            } catch {
+              /* ignore malformed event */
+            }
+          }
+        }
+        if (refined.trim().length < Math.min(20, text.length / 4)) {
+          update(id, { transcript: text, refineStatus: "error" });
+          return text;
+        }
+        update(id, { transcript: refined.trim(), refineStatus: "done" });
+        return refined.trim();
+      } catch (err) {
+        console.error(err);
+        update(id, { transcript: text, refineStatus: "error" });
+        return text;
+      }
+    },
+    [language, update],
+  );
 
   const summarize = useCallback(
     async (text: string, id: string) => {
@@ -240,7 +307,8 @@ function Index() {
           update(id, { status: "error", error: "V nahrávce nebyla rozpoznána žádná řeč." });
         } else {
           update(id, { transcript: text, status: "done" });
-          void summarize(text, id);
+          const refined = await refine(text, id);
+          void summarize(refined, id);
         }
       } catch (err) {
         console.error(err);
@@ -248,7 +316,7 @@ function Index() {
         toast.error("Spojení se přerušilo.");
       }
     },
-    [language, summarize, update],
+    [language, refine, summarize, update],
   );
 
   const start = useCallback(async () => {
@@ -297,14 +365,18 @@ function Index() {
     }
 
     const id = crypto.randomUUID();
+    const filename = `nahravka-${new Date().toISOString().slice(0, 16).replace(":", "-")}.wav`;
     const entry: Recording = {
       id,
       createdAt: Date.now(),
       duration: elapsed,
       transcript: "",
       status: "running",
+      hasAudio: true,
+      audioName: filename,
     };
     persist([entry, ...recordings]);
+    void saveAudio(id, blob, filename);
     void transcribe(blob, id);
   }, [elapsed, persist, recordings, transcribe]);
 
@@ -335,6 +407,8 @@ function Index() {
         transcript: "",
         status: "running",
         title: file.name,
+        hasAudio: true,
+        audioName: file.name,
       };
       setRecordings((prev) => {
         const next = [entry, ...prev];
@@ -345,26 +419,55 @@ function Index() {
         }
         return next;
       });
+      void saveAudio(id, file, file.name);
       void transcribe(file, id, file.name);
     },
     [transcribe],
   );
 
-  const remove = (id: string) => persist(recordings.filter((r) => r.id !== id));
+  const remove = (id: string) => {
+    void deleteAudio(id);
+    persist(recordings.filter((r) => r.id !== id));
+  };
 
   const copy = async (text: string) => {
     await navigator.clipboard.writeText(text);
-    toast.success("Přepis zkopírován.");
+    toast.success("Zkopírováno.");
   };
 
-  const download = (rec: Recording) => {
-    const url = URL.createObjectURL(new Blob([rec.transcript], { type: "text/plain" }));
+  const saveBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `prepis-${new Date(rec.createdAt).toISOString().slice(0, 16)}.txt`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const baseName = (rec: Recording) =>
+    (rec.title?.replace(/\.[a-z0-9]+$/i, "") || new Date(rec.createdAt).toISOString().slice(0, 16))
+      .replace(/[^\p{L}\p{N}\-_ ]/gu, "")
+      .trim() || "nahravka";
+
+  const exportAudio = async (rec: Recording) => {
+    const stored = await loadAudio(rec.id);
+    if (!stored) {
+      toast.error("Zvukový záznam už není uložený v zařízení.");
+      return;
+    }
+    saveBlob(stored.blob, stored.filename || `${baseName(rec)}.wav`);
+  };
+
+  const exportText = (rec: Recording, kind: "transcript" | "summary") => {
+    const text = kind === "transcript" ? rec.transcript : (rec.summary ?? "");
+    if (!text.trim()) {
+      toast.error(kind === "transcript" ? "Přepis není hotový." : "Shrnutí není hotové.");
+      return;
+    }
+    const header = `${rec.title || "Nahrávka"} · ${new Date(rec.createdAt).toLocaleString("cs-CZ")}\n\n`;
+    saveBlob(new Blob([header + text], { type: "text/plain;charset=utf-8" }), `${baseName(rec)}-${kind === "transcript" ? "prepis" : "shrnuti"}.txt`);
+  };
+
 
   const persistGroups = (next: string[]) => {
     setGroups(next);
@@ -625,20 +728,57 @@ function Index() {
                 </div>
                 <div className="flex items-center gap-1">
                   {rec.status === "done" && (
-                    <>
-                      <Button variant="ghost" size="icon" onClick={() => copy(rec.transcript)}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => download(rec)}>
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Kopírovat přepis"
+                      onClick={() => copy(rec.transcript)}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
                   )}
-                  <Button variant="ghost" size="icon" onClick={() => remove(rec.id)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Smazat nahrávku"
+                    onClick={() => remove(rec.id)}
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
+
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/30 p-3">
+                <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Download className="h-3.5 w-3.5" />
+                  Export
+                </span>
+                {rec.hasAudio && (
+                  <Button variant="outline" size="sm" onClick={() => void exportAudio(rec)}>
+                    <Music className="mr-1.5 h-3.5 w-3.5" />
+                    Zvuk
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rec.status !== "done"}
+                  onClick={() => exportText(rec, "transcript")}
+                >
+                  <FileText className="mr-1.5 h-3.5 w-3.5" />
+                  Celý přepis
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rec.summaryStatus !== "done"}
+                  onClick={() => exportText(rec, "summary")}
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  AI shrnutí
+                </Button>
+              </div>
+
 
               {rec.status === "error" ? (
                 <p className="text-sm text-destructive">{rec.error}</p>
@@ -698,6 +838,12 @@ function Index() {
                     <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       Celý přepis
                     </summary>
+                    {rec.refineStatus === "running" && (
+                      <p className="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
+                        <WandSparkles className="h-3.5 w-3.5" />
+                        dolaďuji češtinu, jména a čísla…
+                      </p>
+                    )}
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
                       {rec.transcript}
                       {rec.status === "running" && (
@@ -707,6 +853,16 @@ function Index() {
                         </span>
                       )}
                     </p>
+                    {rec.rawTranscript && rec.rawTranscript !== rec.transcript && (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs text-muted-foreground">
+                          Původní strojový přepis
+                        </summary>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                          {rec.rawTranscript}
+                        </p>
+                      </details>
+                    )}
                   </details>
                 </>
               )}
@@ -714,6 +870,17 @@ function Index() {
           ))}
         </section>
       </div>
+
+      {showBack && (
+        <Button
+          size="icon"
+          aria-label="Zpět nahoru"
+          className="fixed bottom-6 right-6 h-11 w-11 rounded-full shadow-lg"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        >
+          <ArrowUp className="h-5 w-5" />
+        </Button>
+      )}
     </main>
   );
 }

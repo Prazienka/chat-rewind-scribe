@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiRefineRouteImport } from './routes/api/refine'
 import { Route as ApiSummarizeRouteImport } from './routes/api/summarize'
 import { Route as ApiTranscribeRouteImport } from './routes/api/transcribe'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRefineRoute = ApiRefineRouteImport.update({
+  id: '/api/refine',
+  path: '/api/refine',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSummarizeRoute = ApiSummarizeRouteImport.update({
@@ -31,30 +37,34 @@ const ApiTranscribeRoute = ApiTranscribeRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/refine': typeof ApiRefineRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/api/transcribe': typeof ApiTranscribeRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/refine': typeof ApiRefineRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/api/transcribe': typeof ApiTranscribeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/refine': typeof ApiRefineRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/api/transcribe': typeof ApiTranscribeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/summarize' | '/api/transcribe'
+  fullPaths: '/' | '/api/refine' | '/api/summarize' | '/api/transcribe'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/summarize' | '/api/transcribe'
-  id: '__root__' | '/' | '/api/summarize' | '/api/transcribe'
+  to: '/' | '/api/refine' | '/api/summarize' | '/api/transcribe'
+  id: '__root__' | '/' | '/api/refine' | '/api/summarize' | '/api/transcribe'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiRefineRoute: typeof ApiRefineRoute
   ApiSummarizeRoute: typeof ApiSummarizeRoute
   ApiTranscribeRoute: typeof ApiTranscribeRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/refine': {
+      id: '/api/refine'
+      path: '/api/refine'
+      fullPath: '/api/refine'
+      preLoaderRoute: typeof ApiRefineRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/summarize': {
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiRefineRoute: ApiRefineRoute,
   ApiSummarizeRoute: ApiSummarizeRoute,
   ApiTranscribeRoute: ApiTranscribeRoute,
 }
