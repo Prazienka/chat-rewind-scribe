@@ -144,7 +144,8 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <main>
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-        {workspaceMode ? <ChatWorkspace mode={workspaceMode} /> : <Outlet />}
+        {workspaceMode ? <ChatWorkspace mode={workspaceMode} /> : null}
+        <Outlet />
       </main>
       <Toaster />
     </QueryClientProvider>
