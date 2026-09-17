@@ -886,36 +886,70 @@ function Index() {
                     )}
                   </div>
 
-                  <details className="rounded-lg border border-border/70 p-4">
-                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Celý přepis
-                    </summary>
+                  <div className="rounded-lg border border-border/70 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setOpenTranscript((prev) => ({ ...prev, [rec.id]: !prev[rec.id] }))
+                        }
+                      >
+                        {openTranscript[rec.id] ? (
+                          <>
+                            <EyeOff className="mr-1.5 h-3.5 w-3.5" />
+                            Skrýt celý přepis
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="mr-1.5 h-3.5 w-3.5" />
+                            Zobrazit celý přepis
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={rec.status !== "done"}
+                        onClick={() => exportText(rec, "transcript")}
+                      >
+                        <Download className="mr-1.5 h-3.5 w-3.5" />
+                        Exportovat přepis
+                      </Button>
+                    </div>
+
                     {rec.refineStatus === "running" && (
                       <p className="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
                         <WandSparkles className="h-3.5 w-3.5" />
                         dolaďuji češtinu, jména a čísla…
                       </p>
                     )}
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                      {rec.transcript}
-                      {rec.status === "running" && (
-                        <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          přepisuji…
-                        </span>
-                      )}
-                    </p>
-                    {rec.rawTranscript && rec.rawTranscript !== rec.transcript && (
-                      <details className="mt-3">
-                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                          Původní strojový přepis
-                        </summary>
-                        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                          {rec.rawTranscript}
+
+                    {openTranscript[rec.id] && (
+                      <>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                          {rec.transcript}
+                          {rec.status === "running" && (
+                            <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              přepisuji…
+                            </span>
+                          )}
                         </p>
-                      </details>
+                        {rec.rawTranscript && rec.rawTranscript !== rec.transcript && (
+                          <details className="mt-3">
+                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                              Původní strojový přepis
+                            </summary>
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                              {rec.rawTranscript}
+                            </p>
+                          </details>
+                        )}
+                      </>
                     )}
-                  </details>
+                  </div>
+
                 </>
               )}
             </Card>
