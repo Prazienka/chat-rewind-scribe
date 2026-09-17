@@ -11,6 +11,10 @@ import {
   Upload,
   Sparkles,
   RefreshCw,
+  Pencil,
+  Check,
+  FolderPlus,
+  FolderOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -49,9 +53,11 @@ type Recording = {
   summary?: string;
   summaryStatus?: "running" | "done" | "error";
   summaryError?: string;
+  group?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
+const GROUPS_KEY = "zapisnik.groups";
 const LANGS = [
   { value: "auto", label: "Automaticky" },
   { value: "cs", label: "Čeština" },
@@ -66,6 +72,11 @@ function Index() {
   const [elapsed, setElapsed] = useState(0);
   const [language, setLanguage] = useState("auto");
   const [level, setLevel] = useState(0);
+  const [groups, setGroups] = useState<string[]>([]);
+  const [filter, setFilter] = useState("all");
+  const [newGroup, setNewGroup] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -77,6 +88,8 @@ function Index() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) setRecordings(JSON.parse(raw));
+      const rawGroups = localStorage.getItem(GROUPS_KEY);
+      if (rawGroups) setGroups(JSON.parse(rawGroups));
     } catch {
       /* ignore */
     }
@@ -351,6 +364,52 @@ function Index() {
     URL.revokeObjectURL(url);
   };
 
+  const persistGroups = (next: string[]) => {
+    setGroups(next);
+    try {
+      localStorage.setItem(GROUPS_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const addGroup = () => {
+    const name = newGroup.trim();
+    if (!name) return;
+    if (groups.includes(name)) {
+      toast.error("Skupina s tímto názvem už existuje.");
+      return;
+    }
+    persistGroups([...groups, name]);
+    setNewGroup("");
+    setFilter(name);
+    toast.success(`Skupina „${name}“ vytvořena.`);
+  };
+
+  const removeGroup = (name: string) => {
+    persistGroups(groups.filter((g) => g !== name));
+    persist(recordings.map((r) => (r.group === name ? { ...r, group: "" } : r)));
+    setFilter("all");
+  };
+
+  const startRename = (rec: Recording) => {
+    setEditingId(rec.id);
+    setEditingTitle(rec.title ?? new Date(rec.createdAt).toLocaleString("cs-CZ"));
+  };
+
+  const saveRename = (id: string) => {
+    const name = editingTitle.trim();
+    update(id, { title: name });
+    setEditingId(null);
+  };
+
+  const visible =
+    filter === "all"
+      ? recordings
+      : filter === "none"
+        ? recordings.filter((r) => !r.group)
+        : recordings.filter((r) => r.group === filter);
+
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto w-full max-w-2xl px-5 py-10">
@@ -440,6 +499,72 @@ function Index() {
             Vaše nahrávky
           </h2>
 
+          <Card className="space-y-3 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <FolderOpen className="h-4 w-4 text-muted-foreground" />
+              <Button
+                variant={filter === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilter("all")}
+              >
+                Vše
+              </Button>
+              {groups.map((g) => (
+                <span key={g} className="flex items-center">
+                  <Button
+                    variant={filter === g ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setFilter(g)}
+                  >
+                    {g}
+                    <span className="ml-1 text-xs opacity-70">
+                      {recordings.filter((r) => r.group === g).length}
+                    </span>
+                  </Button>
+                  {filter === g && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Smazat skupinu ${g}`}
+                      onClick={() => removeGroup(g)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </span>
+              ))}
+              <Button
+                variant={filter === "none" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilter("none")}
+              >
+                Bez skupiny
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                value={newGroup}
+                onChange={(e) => setNewGroup(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addGroup();
+                }}
+                placeholder="Název nové skupiny"
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground"
+              />
+              <Button variant="outline" size="sm" onClick={addGroup}>
+                <FolderPlus className="mr-2 h-4 w-4" />
+                Přidat
+              </Button>
+            </div>
+          </Card>
+
+          {visible.length === 0 && recordings.length > 0 && (
+            <Card className="border-dashed bg-card/50 p-8 text-center">
+              <p className="text-sm text-muted-foreground">V této skupině není žádná nahrávka.</p>
+            </Card>
+          )}
+
           {recordings.length === 0 && (
             <Card className="flex flex-col items-center gap-2 border-dashed bg-card/50 p-10 text-center">
               <FileAudio className="h-6 w-6 text-muted-foreground" />
@@ -447,17 +572,54 @@ function Index() {
             </Card>
           )}
 
-          {recordings.map((rec) => (
+          {visible.map((rec) => (
             <Card key={rec.id} className="space-y-3 p-5">
               <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">
-                    {rec.title ?? new Date(rec.createdAt).toLocaleString("cs-CZ")}
-                  </p>
+                <div className="min-w-0 flex-1">
+                  {editingId === rec.id ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        autoFocus
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveRename(rec.id);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+                      />
+                      <Button size="sm" onClick={() => saveRename(rec.id)}>
+                        <Check className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => startRename(rec)}
+                      className="flex w-full items-center gap-2 text-left"
+                    >
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {rec.title || new Date(rec.createdAt).toLocaleString("cs-CZ")}
+                      </span>
+                      <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    </button>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {rec.title ? `${new Date(rec.createdAt).toLocaleString("cs-CZ")} · ` : ""}
                     Délka {formatDuration(rec.duration)}
                   </p>
+                  <select
+                    value={rec.group ?? ""}
+                    onChange={(e) => update(rec.id, { group: e.target.value })}
+                    className="mt-2 rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground"
+                  >
+                    <option value="">Bez skupiny</option>
+                    {groups.map((g) => (
+                      <option key={g} value={g}>
+                        {g}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="flex items-center gap-1">
                   {rec.status === "done" && (
