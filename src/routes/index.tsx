@@ -395,7 +395,7 @@ function Index() {
 
   const saveRename = (id: string) => {
     const name = editingTitle.trim();
-    update(id, { title: name || undefined });
+    update(id, { title: name });
     setEditingId(null);
   };
 
