@@ -30,12 +30,25 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
+const REMEMBER_KEY = "zapisnik.remember";
+
 function AuthPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  const saveRemember = () => {
+    try {
+      localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0");
+      sessionStorage.setItem("zapisnik.session-alive", "1");
+    } catch {
+      /* ignore */
+    }
+  };
+
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
