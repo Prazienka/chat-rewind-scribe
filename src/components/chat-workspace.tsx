@@ -83,6 +83,7 @@ type Recording = {
 
 const STORAGE_KEY = "zapisnik.recordings";
 const GROUPS_KEY = "zapisnik.groups";
+const ACTIVE_GROUP_KEY = "zapisnik.active-group";
 const LANGS = [
   { value: "cs", label: "Čeština" },
   { value: "auto", label: "Automaticky" },
@@ -103,6 +104,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const [level, setLevel] = useState(0);
   const [groups, setGroups] = useState<string[]>([]);
   const [filter, setFilter] = useState("all");
+  const [recordingGroup, setRecordingGroup] = useState("none");
   const [showBack, setShowBack] = useState(false);
   const [newGroup, setNewGroup] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -130,6 +132,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       if (raw) setRecordings(JSON.parse(raw));
       const rawGroups = localStorage.getItem(GROUPS_KEY);
       if (rawGroups) setGroups(JSON.parse(rawGroups));
+      const activeGroup = localStorage.getItem(ACTIVE_GROUP_KEY);
+      if (activeGroup) setRecordingGroup(activeGroup);
     } catch {
       /* ignore */
     }
@@ -606,7 +610,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     pendingRef.current = null;
     setPending(null);
     const blob = encodeWav(held.chunks, held.sampleRate);
-    const group = filter !== "all" && filter !== "none" ? filter : "";
+    const group = recordingGroup !== "none" ? recordingGroup : "";
     const id = crypto.randomUUID();
     const filename = `nahravka-${new Date().toISOString().slice(0, 16).replace(":", "-")}.wav`;
     const entry: Recording = {
@@ -625,7 +629,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     elapsedBaseRef.current = 0;
     setElapsed(0);
     toast.success(group ? `Uloženo do složky „${group}“.` : "Uloženo mezi nahrávky bez složky.");
-  }, [filter, persist, recordings, storeAudio, transcribe]);
+  }, [persist, recordingGroup, recordings, storeAudio, transcribe]);
 
   const continuePending = useCallback(() => {
     setPending(null);
@@ -670,6 +674,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         title: file.name,
         hasAudio: true,
         audioName: file.name,
+        group: recordingGroup !== "none" ? recordingGroup : "",
       };
       setRecordings((prev) => {
         const next = [entry, ...prev];
@@ -683,7 +688,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       void storeAudio(id, file, file.name);
       void transcribe(file, id, file.name);
     },
-    [storeAudio, transcribe],
+    [recordingGroup, storeAudio, transcribe],
   );
 
   const remove = (id: string) => {
@@ -786,6 +791,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     if (user) void addCloudGroup(user.id, name).catch(() => {});
     setNewGroup("");
     setFilter(name);
+    setRecordingGroup(name);
+    localStorage.setItem(ACTIVE_GROUP_KEY, name);
     toast.success(`Skupina „${name}“ vytvořena.`);
   };
 
@@ -794,6 +801,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     if (user) void deleteCloudGroup(name).catch(() => {});
     persist(recordings.map((r) => (r.group === name ? { ...r, group: "" } : r)));
     setFilter("all");
+    if (recordingGroup === name) {
+      setRecordingGroup("none");
+      localStorage.setItem(ACTIVE_GROUP_KEY, "none");
+    }
   };
 
 
@@ -957,7 +968,14 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                 </div>
                 <div className="space-y-2">
                   <label htmlFor="recording-folder" className="text-sm font-medium text-foreground">Uložit do složky</label>
-                  <Select value={filter === "all" ? "none" : filter} onValueChange={(value) => setFilter(value)} disabled={isRecording}>
+                  <Select
+                    value={recordingGroup}
+                    onValueChange={(value) => {
+                      setRecordingGroup(value);
+                      localStorage.setItem(ACTIVE_GROUP_KEY, value);
+                    }}
+                    disabled={isRecording}
+                  >
                     <SelectTrigger id="recording-folder" className="h-11 bg-background"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectItem value="none">Bez složky</SelectItem>{groups.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}</SelectContent>
                   </Select>
@@ -1023,7 +1041,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         ) : (
         <section id="transcripts" className="scroll-mt-24">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
-            <div className="min-w-0"><p className="text-sm font-medium text-primary">Knihovna</p><h2 className="truncate font-display text-2xl font-semibold text-foreground">Nahrávky a přepisy</h2></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-primary">Knihovna</p><h1 className="truncate font-display text-2xl font-semibold text-foreground">Nahrávky a přepisy</h1></div>
             <Badge variant="secondary">{recordings.length} {recordings.length === 1 ? "záznam" : "záznamů"}</Badge>
           </div>
 
@@ -1045,7 +1063,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                   <Button
                     variant={filter === g ? "default" : "outline"}
                     className="min-h-11"
-                    onClick={() => setFilter(g)}
+                    onClick={() => {
+                      setFilter(g);
+                      setRecordingGroup(g);
+                      localStorage.setItem(ACTIVE_GROUP_KEY, g);
+                    }}
                   >
                     <Folder aria-hidden="true" />{g}
                     <span className="ml-1 text-xs opacity-70">
@@ -1089,7 +1111,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           )}
 
           {recordings.length === 0 && (
-            <div className="mt-5 flex flex-col items-center rounded-lg border border-dashed border-border bg-card p-10 text-center"><FileAudio className="size-8 text-primary" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Vaše první nahrávka začne tady</p><p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">Klepněte nahoře na mikrofon, nahrajte rozhovor a po zastavení se zde objeví přepis.</p><Button className="mt-5 min-h-11" asChild><a href="#record"><Mic aria-hidden="true" /> Začít nahrávat</a></Button></div>
+            <div className="mt-5 flex flex-col items-center rounded-lg border border-dashed border-border bg-card p-10 text-center"><FileAudio className="size-8 text-primary" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Vaše první nahrávka začne tady</p><p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">Nahrajte rozhovor a po zastavení se zde objeví přepis.</p><Button className="mt-5 min-h-11" asChild><Link to="/"><Mic aria-hidden="true" /> Začít nahrávat</Link></Button></div>
           )}
 
           <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.25fr)]">
@@ -1192,8 +1214,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
             <AlertDialogTitle>Uložit nahrávku?</AlertDialogTitle>
             <AlertDialogDescription>
               Nahrávka je dlouhá {formatDuration(pending?.duration ?? 0)}. Uložit ji{" "}
-              {filter !== "all" && filter !== "none"
-                ? `do složky „${filter}“`
+              {recordingGroup !== "none"
+                ? `do složky „${recordingGroup}“`
                 : "mezi nahrávky bez složky"}
               , nebo pokračovat v nahrávání?
             </AlertDialogDescription>
