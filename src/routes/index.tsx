@@ -91,6 +91,9 @@ function Index() {
   const [newGroup, setNewGroup] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
+  const [openTranscript, setOpenTranscript] = useState<Record<string, boolean>>({});
+
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
