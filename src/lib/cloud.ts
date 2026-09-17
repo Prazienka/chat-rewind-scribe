@@ -41,7 +41,7 @@ const fromRow = (row: Row): CloudRecording => ({
   title: row.title ?? "",
   rawTranscript: row.raw_transcript ?? "",
   summary: row.summary ?? "",
-  summaryStatus: row.summary ? "done" : undefined,
+  summaryStatus: row.summary ? ("done" as const) : ("error" as const),
   group: row.group_name ?? "",
   hasAudio: Boolean(row.audio_path),
   audioName: row.audio_name ?? "",
