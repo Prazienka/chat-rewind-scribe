@@ -808,6 +808,29 @@ function Index() {
                 </Button>
               </div>
 
+              {rec.hasAudio && (
+                <div className="rounded-lg border border-border/60 p-3">
+                  <Button variant="outline" size="sm" onClick={() => void togglePlayer(rec)}>
+                    {audioUrls[rec.id] ? (
+                      <>
+                        <X className="mr-1.5 h-3.5 w-3.5" />
+                        Zavřít přehrávač
+                      </>
+                    ) : (
+                      <>
+                        <Play className="mr-1.5 h-3.5 w-3.5" />
+                        Přehrát záznam
+                      </>
+                    )}
+                  </Button>
+                  {audioUrls[rec.id] && (
+                    <audio className="mt-3 w-full" controls src={audioUrls[rec.id]} />
+                  )}
+                </div>
+              )}
+
+
+
 
               {rec.status === "error" ? (
                 <p className="text-sm text-destructive">{rec.error}</p>
