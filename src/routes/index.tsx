@@ -789,7 +789,10 @@ function Index() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => void supabase.auth.signOut()}
+                  onClick={() =>
+                    void getSupabase().then((sb) => sb.auth.signOut())
+                  }
+
                 >
                   <LogOut className="mr-1 h-3.5 w-3.5" />
                   Odhlásit
