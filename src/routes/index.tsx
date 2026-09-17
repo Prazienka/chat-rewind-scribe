@@ -1198,6 +1198,33 @@ function Index() {
           <ArrowUp className="h-5 w-5" />
         </Button>
       )}
+
+      <AlertDialog open={pending !== null}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Uložit nahrávku?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Nahrávka je dlouhá {formatDuration(pending?.duration ?? 0)}. Uložit ji{" "}
+              {filter !== "all" && filter !== "none"
+                ? `do složky „${filter}“`
+                : "mezi nahrávky bez složky"}
+              , nebo pokračovat v nahrávání?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:justify-between">
+            <Button variant="ghost" onClick={discardPending}>
+              Zahodit
+            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button variant="outline" onClick={continuePending}>
+                Pokračovat v nahrávání
+              </Button>
+              <Button onClick={savePending}>Uložit</Button>
+            </div>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
+
   );
 }
