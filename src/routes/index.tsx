@@ -109,11 +109,70 @@ function Index() {
     return () => clearInterval(timer);
   }, [isRecording]);
 
+  const summarize = useCallback(
+    async (text: string, id: string) => {
+      update(id, { summaryStatus: "running", summary: "", summaryError: undefined });
+      try {
+        const res = await fetch("/api/summarize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok || !res.body) {
+          let message = "Shrnutí se nepodařilo.";
+          try {
+            const data = (await res.json()) as { error?: string };
+            if (data?.error) message = data.error;
+          } catch {
+            /* ignore */
+          }
+          update(id, { summaryStatus: "error", summaryError: message });
+          return;
+        }
+
+        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = "";
+        let summary = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const event = JSON.parse(payload) as { type?: string; delta?: string };
+              if (event.type === "response.output_text.delta" && event.delta) {
+                summary += event.delta;
+                update(id, { summary });
+              }
+            } catch {
+              /* ignore malformed event */
+            }
+          }
+        }
+        if (summary.trim().length === 0) {
+          update(id, { summaryStatus: "error", summaryError: "Shrnutí se nepodařilo vytvořit." });
+        } else {
+          update(id, { summary, summaryStatus: "done" });
+        }
+      } catch (err) {
+        console.error(err);
+        update(id, { summaryStatus: "error", summaryError: "Spojení se přerušilo." });
+      }
+    },
+    [update],
+  );
+
   const transcribe = useCallback(
-    async (blob: Blob, id: string) => {
+    async (blob: Blob, id: string, filename = "recording.wav") => {
       const body = new FormData();
-      body.append("file", blob, "recording.wav");
+      body.append("file", blob, filename);
       body.append("language", language);
+
 
       try {
         const res = await fetch("/api/transcribe", { method: "POST", body });
