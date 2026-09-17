@@ -88,6 +88,53 @@ function AuthPage() {
     }
   };
 
+  const googleError = (err: unknown): { title: string; hint: string } => {
+    const msg = err instanceof Error ? err.message : String(err ?? "");
+    const m = msg.toLowerCase();
+    if (/popup|blocked|opener/i.test(m)) {
+      return {
+        title: "Vyskakovací okno se neotevřelo",
+        hint: "Prohlížeč zablokoval okno Google. Povolte vyskakovací okna pro tuto stránku (ikona v adresním řádku) a zkuste to znovu – nebo aplikaci otevřete v samostatné záložce.",
+      };
+    }
+    if (/closed|dismissed/i.test(m)) {
+      return {
+        title: "Přihlášení se nedokončilo",
+        hint: "Okno Google se zavřelo dřív, než se přihlášení dokončilo. Zkuste to prosím znovu a okno během přihlašování nezavírejte.",
+      };
+    }
+    if (/access_denied|denied|consent/i.test(m)) {
+      return {
+        title: "Přístup k účtu byl odepřen",
+        hint: "Přihlášení přes Google jste zrušili, nebo jste neudělili souhlas. Zkuste to znovu a v okně Google přihlášení potvrďte.",
+      };
+    }
+    if (/not supported|not enabled|not configured|unsupported|provider/i.test(m)) {
+      return {
+        title: "Přihlášení přes Google není k dispozici",
+        hint: "Přihlašování přes Google právě nefunguje. Přihlaste se prosím e-mailem a heslem – pokud heslo nemáte, zaregistrujte se jím.",
+      };
+    }
+    if (/redirect|invalid_client|unauthorized_client|invalid_request/i.test(m)) {
+      return {
+        title: "Google přihlášení je špatně nastavené",
+        hint: "Přihlášení selhalo kvůli technickému nastavení. Zkuste se prosím přihlásit e-mailem a heslem a chybu nám dejte vědět – opravíme ji.",
+      };
+    }
+    if (/network|fetch|timeout|timed out|failed to fetch|load failed/i.test(m)) {
+      return {
+        title: "Nepodařilo se spojit s Google",
+        hint: "Zkontrolujte připojení k internetu a zkuste to znovu. Případně se přihlaste e-mailem a heslem.",
+      };
+    }
+    return {
+      title: "Přihlášení přes Google se nepodařilo",
+      hint: msg
+        ? `Důvod: ${msg}. Zkuste to znovu, nebo se přihlaste e-mailem a heslem.`
+        : "Zkuste to prosím znovu, nebo se přihlaste e-mailem a heslem.",
+    };
+  };
+
   const google = async () => {
     if (busy) return;
     setBusy(true);
@@ -97,29 +144,17 @@ function AuthPage() {
         redirect_uri: window.location.origin,
       });
       if (result.error) {
-        const msg = result.error.message || "";
         console.error("Google sign-in error:", result.error);
-        if (/popup|blocked|window/i.test(msg)) {
-          toast.error(
-            "Okno Google se nepodařilo otevřít – povolte vyskakovací okna, nebo aplikaci otevřete v samostatné záložce.",
-          );
-        } else if (/not supported|not enabled|provider/i.test(msg)) {
-          toast.error("Přihlášení přes Google zatím není zapnuté. Zkuste e-mail a heslo.");
-        } else {
-          toast.error(`Přihlášení přes Google se nepodařilo: ${msg || "neznámá chyba"}`);
-        }
+        const { title, hint } = googleError(result.error);
+        toast.error(title, { description: hint, duration: 12000 });
         return;
       }
       if (result.redirected) return;
       void navigate({ to: "/" });
     } catch (err) {
       console.error("Google sign-in threw:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(
-        /popup|blocked|closed/i.test(msg)
-          ? "Okno Google se zavřelo dřív, než přihlášení skončilo. Zkuste to prosím znovu."
-          : `Přihlášení přes Google se nepodařilo: ${msg}`,
-      );
+      const { title, hint } = googleError(err);
+      toast.error(title, { description: hint, duration: 12000 });
     } finally {
       setBusy(false);
     }
