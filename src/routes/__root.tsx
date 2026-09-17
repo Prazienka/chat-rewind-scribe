@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -13,6 +14,7 @@ import appCss from "../styles.css?url";
 import { Toaster } from "../components/ui/sonner";
 import { Button } from "../components/ui/button";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { ChatWorkspace } from "../components/chat-workspace";
 
 
 function NotFoundComponent() {
@@ -135,12 +137,14 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const workspaceMode = pathname === "/" ? "recorder" : pathname === "/transcripts" ? "library" : null;
 
   return (
     <QueryClientProvider client={queryClient}>
       <main>
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-        <Outlet />
+        {workspaceMode ? <ChatWorkspace mode={workspaceMode} /> : <Outlet />}
       </main>
       <Toaster />
     </QueryClientProvider>

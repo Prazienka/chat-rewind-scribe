@@ -1,7 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { ChatWorkspace } from "@/components/chat-workspace";
-
 export const Route = createFileRoute("/transcripts")({
   head: () => ({
     meta: [
@@ -17,5 +15,5 @@ export const Route = createFileRoute("/transcripts")({
 });
 
 function TranscriptsPage() {
-  return <ChatWorkspace mode="library" />;
+  return null;
 }
