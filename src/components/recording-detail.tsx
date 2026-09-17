@@ -42,7 +42,7 @@ export type RecordingView = {
 
 type Props = {
   recording: RecordingView;
-  audioUrl?: string;
+  audioUrl?: string | undefined;
   onClose: () => void;
   onCopy: (text: string) => void;
   onDelete: () => void;
