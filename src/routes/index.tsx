@@ -49,9 +49,11 @@ type Recording = {
   summary?: string;
   summaryStatus?: "running" | "done" | "error";
   summaryError?: string;
+  group?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
+const GROUPS_KEY = "zapisnik.groups";
 const LANGS = [
   { value: "auto", label: "Automaticky" },
   { value: "cs", label: "Čeština" },
@@ -66,6 +68,11 @@ function Index() {
   const [elapsed, setElapsed] = useState(0);
   const [language, setLanguage] = useState("auto");
   const [level, setLevel] = useState(0);
+  const [groups, setGroups] = useState<string[]>([]);
+  const [filter, setFilter] = useState("all");
+  const [newGroup, setNewGroup] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -77,6 +84,8 @@ function Index() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) setRecordings(JSON.parse(raw));
+      const rawGroups = localStorage.getItem(GROUPS_KEY);
+      if (rawGroups) setGroups(JSON.parse(rawGroups));
     } catch {
       /* ignore */
     }
@@ -350,6 +359,52 @@ function Index() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const persistGroups = (next: string[]) => {
+    setGroups(next);
+    try {
+      localStorage.setItem(GROUPS_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const addGroup = () => {
+    const name = newGroup.trim();
+    if (!name) return;
+    if (groups.includes(name)) {
+      toast.error("Skupina s tímto názvem už existuje.");
+      return;
+    }
+    persistGroups([...groups, name]);
+    setNewGroup("");
+    setFilter(name);
+    toast.success(`Skupina „${name}“ vytvořena.`);
+  };
+
+  const removeGroup = (name: string) => {
+    persistGroups(groups.filter((g) => g !== name));
+    persist(recordings.map((r) => (r.group === name ? { ...r, group: "" } : r)));
+    setFilter("all");
+  };
+
+  const startRename = (rec: Recording) => {
+    setEditingId(rec.id);
+    setEditingTitle(rec.title ?? new Date(rec.createdAt).toLocaleString("cs-CZ"));
+  };
+
+  const saveRename = (id: string) => {
+    const name = editingTitle.trim();
+    update(id, { title: name || undefined });
+    setEditingId(null);
+  };
+
+  const visible =
+    filter === "all"
+      ? recordings
+      : filter === "none"
+        ? recordings.filter((r) => !r.group)
+        : recordings.filter((r) => r.group === filter);
 
   return (
     <main className="min-h-screen bg-background">
