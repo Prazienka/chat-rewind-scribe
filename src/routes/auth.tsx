@@ -89,17 +89,42 @@ function AuthPage() {
   };
 
   const google = async () => {
-    saveRemember();
-    const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
-    });
-    if (result.error) {
-      toast.error("Přihlášení přes Google se nepodařilo.");
-      return;
+    if (busy) return;
+    setBusy(true);
+    try {
+      saveRemember();
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin,
+      });
+      if (result.error) {
+        const msg = result.error.message || "";
+        console.error("Google sign-in error:", result.error);
+        if (/popup|blocked|window/i.test(msg)) {
+          toast.error(
+            "Okno Google se nepodařilo otevřít – povolte vyskakovací okna, nebo aplikaci otevřete v samostatné záložce.",
+          );
+        } else if (/not supported|not enabled|provider/i.test(msg)) {
+          toast.error("Přihlášení přes Google zatím není zapnuté. Zkuste e-mail a heslo.");
+        } else {
+          toast.error(`Přihlášení přes Google se nepodařilo: ${msg || "neznámá chyba"}`);
+        }
+        return;
+      }
+      if (result.redirected) return;
+      void navigate({ to: "/" });
+    } catch (err) {
+      console.error("Google sign-in threw:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(
+        /popup|blocked|closed/i.test(msg)
+          ? "Okno Google se zavřelo dřív, než přihlášení skončilo. Zkuste to prosím znovu."
+          : `Přihlášení přes Google se nepodařilo: ${msg}`,
+      );
+    } finally {
+      setBusy(false);
     }
-    if (result.redirected) return;
-    void navigate({ to: "/" });
   };
+
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-5 py-12">
