@@ -7,3 +7,9 @@
 - [x] Doladit mobilní ovládání, přístupnost a prázdné/loading stavy
 - [x] Optimalizovat odvozené výpočty a úklid zvukových zdrojů
 - [x] Ověřit desktop, mobil a build
+
+# Oddělení homepage a knihovny
+- [ ] Vytvořit samostatnou stránku /transcripts
+- [ ] Odebrat knihovnu z homepage a zachovat aktuální stav zpracování
+- [ ] Propojit desktopovou a mobilní navigaci
+- [ ] Ověřit build a preview na desktopu i mobilu
