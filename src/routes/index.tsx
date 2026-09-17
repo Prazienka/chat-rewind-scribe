@@ -449,11 +449,12 @@ function Index() {
           {recordings.map((rec) => (
             <Card key={rec.id} className="space-y-3 p-5">
               <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">
-                    {new Date(rec.createdAt).toLocaleString("cs-CZ")}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {rec.title ?? new Date(rec.createdAt).toLocaleString("cs-CZ")}
                   </p>
                   <p className="text-xs text-muted-foreground">
+                    {rec.title ? `${new Date(rec.createdAt).toLocaleString("cs-CZ")} · ` : ""}
                     Délka {formatDuration(rec.duration)}
                   </p>
                 </div>
