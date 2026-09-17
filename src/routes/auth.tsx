@@ -175,9 +175,15 @@ function AuthPage() {
           </Button>
         </form>
 
-        <Button variant="outline" className="mt-3 w-full" onClick={() => void google()}>
+        <Button
+          variant="outline"
+          className="mt-3 w-full"
+          disabled={busy}
+          onClick={() => void google()}
+        >
           Pokračovat s Google
         </Button>
+
 
         <button
           type="button"
