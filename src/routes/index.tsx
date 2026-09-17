@@ -41,6 +41,14 @@ import {
 } from "@/lib/cloud";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { encodeWav, formatDuration } from "@/lib/wav";
 import { saveAudio, loadAudio, deleteAudio } from "@/lib/audio-store";
 
