@@ -801,7 +801,7 @@ function Index() {
                 />
               )}
               <Button
-                onClick={isRecording ? stop : start}
+                onClick={() => void (isRecording ? stop() : start())}
                 size="icon"
                 className="relative h-20 w-20 rounded-full"
                 variant={isRecording ? "destructive" : "default"}
