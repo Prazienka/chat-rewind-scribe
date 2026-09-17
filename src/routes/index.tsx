@@ -81,6 +81,7 @@ type Recording = {
   group?: string;
   hasAudio?: boolean;
   audioName?: string;
+  audioPath?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
