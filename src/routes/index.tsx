@@ -461,14 +461,6 @@ function Index() {
     saveBlob(new Blob([header + text], { type: "text/plain;charset=utf-8" }), `${baseName(rec)}-${kind === "transcript" ? "prepis" : "shrnuti"}.txt`);
   };
 
-  const download = (rec: Recording) => {
-    const url = URL.createObjectURL(new Blob([rec.transcript], { type: "text/plain" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `prepis-${new Date(rec.createdAt).toISOString().slice(0, 16)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   const persistGroups = (next: string[]) => {
     setGroups(next);
