@@ -133,6 +133,13 @@ function Index() {
     return () => clearInterval(timer);
   }, [isRecording]);
 
+  useEffect(() => {
+    const onScroll = () => setShowBack(window.scrollY > 400);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   const refine = useCallback(
     async (text: string, id: string): Promise<string> => {
       update(id, { rawTranscript: text, refineStatus: "running" });
