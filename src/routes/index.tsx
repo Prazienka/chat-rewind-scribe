@@ -232,7 +232,7 @@ function Index() {
         toast.error("Spojení se přerušilo.");
       }
     },
-    [language, update],
+    [language, summarize, update],
   );
 
   const start = useCallback(async () => {
