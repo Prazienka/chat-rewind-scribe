@@ -65,13 +65,13 @@ import { saveAudio, loadAudio, deleteAudio } from "@/lib/audio-store";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Zápisník – nahrávání rozhovorů a AI přepisy" },
+      { title: "Chat Scribe – nahrávání rozhovorů a AI přepisy" },
       {
         name: "description",
         content:
           "Nahrajte rozhovor přímo v prohlížeči a nechte si ho automaticky přepsat do textu pomocí AI.",
       },
-      { property: "og:title", content: "Zápisník – nahrávání rozhovorů a AI přepisy" },
+      { property: "og:title", content: "Chat Scribe – nahrávání rozhovorů a AI přepisy" },
       {
         property: "og:description",
         content: "Nahrajte rozhovor a získejte přesný textový přepis za pár sekund.",
@@ -139,6 +139,7 @@ function Index() {
   const syncedRef = useRef<Record<string, string>>({});
   const elapsedBaseRef = useRef(0);
   const pendingRef = useRef<{ chunks: Float32Array[]; sampleRate: number } | null>(null);
+  const audioUrlsRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     try {
@@ -150,6 +151,15 @@ function Index() {
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    audioUrlsRef.current = audioUrls;
+  }, [audioUrls]);
+
+  useEffect(
+    () => () => Object.values(audioUrlsRef.current).forEach((url) => URL.revokeObjectURL(url)),
+    [],
+  );
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -215,15 +225,22 @@ function Index() {
 
   const update = useCallback((id: string, patch: Partial<Recording>) => {
     setRecordings((prev) => {
-      const next = prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      return prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    });
+  }, []);
+
+  // AI posílá text po malých částech. Zápis do úložiště proto slučujeme,
+  // aby dlouhý přepis neblokoval ovládání aplikace při každém slově.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(recordings));
       } catch {
         /* ignore */
       }
-      return next;
-    });
-  }, []);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [recordings]);
 
   // Po přihlášení stáhnout cloudová data a nahrát to, co je jen v zařízení.
   useEffect(() => {
@@ -823,14 +840,30 @@ function Index() {
     });
   }, [filter, recordings, search]);
 
-  const selected = recordings.find((recording) => recording.id === selectedId) ?? null;
+  const selected = useMemo(
+    () => recordings.find((recording) => recording.id === selectedId) ?? null,
+    [recordings, selectedId],
+  );
 
-  const processingCount = recordings.filter(
-    (recording) =>
-      recording.status === "running" ||
-      recording.refineStatus === "running" ||
-      recording.summaryStatus === "running",
-  ).length;
+  const processingCount = useMemo(
+    () =>
+      recordings.filter(
+        (recording) =>
+          recording.status === "running" ||
+          recording.refineStatus === "running" ||
+          recording.summaryStatus === "running",
+      ).length,
+    [recordings],
+  );
+
+  const groupCounts = useMemo(
+    () =>
+      recordings.reduce<Record<string, number>>((counts, recording) => {
+        if (recording.group) counts[recording.group] = (counts[recording.group] ?? 0) + 1;
+        return counts;
+      }, {}),
+    [recordings],
+  );
 
   const openRecording = (id: string) => {
     setSelectedId(id);
@@ -993,7 +1026,7 @@ function Index() {
                   >
                     <Folder aria-hidden="true" />{g}
                     <span className="ml-1 text-xs opacity-70">
-                      {recordings.filter((r) => r.group === g).length}
+                      {groupCounts[g] ?? 0}
                     </span>
                   </Button>
                   {filter === g && (

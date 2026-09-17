@@ -79,10 +79,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Zápisník – nahrávání rozhovorů a AI přepisy" },
+      { title: "Chat Scribe – nahrávání rozhovorů a AI přepisy" },
       { name: "description", content: "Nahrajte rozhovor a nechte si ho přepsat pomocí AI." },
-      { name: "author", content: "Zápisník" },
-      { property: "og:title", content: "Zápisník – nahrávání rozhovorů a AI přepisy" },
+      { name: "author", content: "Chat Scribe" },
+      { property: "og:title", content: "Chat Scribe – nahrávání rozhovorů a AI přepisy" },
       {
         property: "og:description",
         content: "Nahrajte rozhovor a nechte si ho přepsat pomocí AI.",
@@ -94,7 +94,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "theme-color", content: "#0b0f14" },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
-      { name: "apple-mobile-web-app-title", content: "Zápisník" },
+      { name: "apple-mobile-web-app-title", content: "Chat Scribe" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
     ],
     links: [

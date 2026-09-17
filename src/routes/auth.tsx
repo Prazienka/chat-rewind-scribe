@@ -12,13 +12,13 @@ import { Loader2 } from "lucide-react";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Přihlášení – Zápisník" },
+      { title: "Přihlášení – Chat Scribe" },
       {
         name: "description",
         content:
-          "Přihlaste se do Zápisníku a mějte své nahrávky, přepisy i AI shrnutí ve všech zařízeních.",
+          "Přihlaste se do Chat Scribe a mějte své nahrávky, přepisy i AI shrnutí ve všech zařízeních.",
       },
-      { property: "og:title", content: "Přihlášení – Zápisník" },
+      { property: "og:title", content: "Přihlášení – Chat Scribe" },
       {
         property: "og:description",
         content: "Nahrávky a přepisy dostupné na všech vašich zařízeních.",

@@ -6,4 +6,4 @@
 - [x] Přidat hledání, kopírování, editaci a export v přepisu
 - [x] Doladit mobilní ovládání, přístupnost a prázdné/loading stavy
 - [x] Optimalizovat odvozené výpočty a úklid zvukových zdrojů
-- [ ] Ověřit desktop, mobil a build
+- [x] Ověřit desktop, mobil a build
