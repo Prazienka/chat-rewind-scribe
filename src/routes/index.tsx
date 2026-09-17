@@ -585,10 +585,10 @@ function Index() {
         }
         return next;
       });
-      void saveAudio(id, file, file.name);
+      void storeAudio(id, file, file.name);
       void transcribe(file, id, file.name);
     },
-    [transcribe],
+    [storeAudio, transcribe],
   );
 
   const remove = (id: string) => {
