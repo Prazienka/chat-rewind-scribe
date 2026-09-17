@@ -16,11 +16,15 @@ import {
   FolderPlus,
   FolderOpen,
   ArrowUp,
+  Music,
+  FileText,
+  WandSparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { encodeWav, formatDuration } from "@/lib/wav";
+import { saveAudio, loadAudio, deleteAudio } from "@/lib/audio-store";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -51,17 +55,21 @@ type Recording = {
   status: "running" | "done" | "error";
   error?: string;
   title?: string;
+  rawTranscript?: string;
+  refineStatus?: "running" | "done" | "error";
   summary?: string;
   summaryStatus?: "running" | "done" | "error";
   summaryError?: string;
   group?: string;
+  hasAudio?: boolean;
+  audioName?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
 const GROUPS_KEY = "zapisnik.groups";
 const LANGS = [
-  { value: "auto", label: "Automaticky" },
   { value: "cs", label: "Čeština" },
+  { value: "auto", label: "Automaticky" },
   { value: "en", label: "Angličtina" },
   { value: "sk", label: "Slovenština" },
   { value: "de", label: "Němčina" },
@@ -71,7 +79,7 @@ function Index() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [language, setLanguage] = useState("auto");
+  const [language, setLanguage] = useState("cs");
   const [level, setLevel] = useState(0);
   const [groups, setGroups] = useState<string[]>([]);
   const [filter, setFilter] = useState("all");
