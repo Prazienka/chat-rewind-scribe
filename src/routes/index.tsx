@@ -715,17 +715,43 @@ function Index() {
     <main className="min-h-screen bg-background">
       <div className="mx-auto w-full max-w-2xl px-5 py-10">
         <header className="mb-8">
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            Zápisník
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              Zápisník
+            </p>
+            {user ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {syncing && <CloudUpload className="h-3.5 w-3.5 animate-pulse" />}
+                <span className="max-w-[10rem] truncate">{user.email}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void supabase.auth.signOut()}
+                >
+                  <LogOut className="mr-1 h-3.5 w-3.5" />
+                  Odhlásit
+                </Button>
+              </div>
+            ) : (
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/auth">
+                  <LogIn className="mr-1 h-3.5 w-3.5" />
+                  Přihlásit se
+                </Link>
+              </Button>
+            )}
+          </div>
           <h1 className="mt-2 font-display text-3xl leading-tight text-foreground sm:text-4xl">
             Nahrajte rozhovor, přepis dodá AI
           </h1>
           <p className="mt-3 text-sm text-muted-foreground">
-            Stiskněte nahrávání, mluvte a po zastavení se text objeví sám. Vše zůstává jen ve vašem
-            zařízení.
+            Stiskněte nahrávání, mluvte a po zastavení se text objeví sám.{" "}
+            {user
+              ? "Vaše nahrávky se ukládají do cloudu a máte je na všech zařízeních."
+              : "Přihlaste se a nahrávky budete mít na všech svých zařízeních."}
           </p>
         </header>
+
 
         <Card className="border-border/70 bg-card p-6 shadow-sm">
           <div className="flex flex-col items-center gap-5">
