@@ -1,0 +1,10 @@
+{
+  "name": "Zápisník – nahrávání a AI přepisy",
+  "short_name": "Zápisník",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "lang": "cs",
+  "icons": [{ "src": "/favicon.ico", "sizes": "48x48", "type": "image/x-icon" }]
+}
