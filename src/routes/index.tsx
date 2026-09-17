@@ -41,6 +41,14 @@ import {
 } from "@/lib/cloud";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { encodeWav, formatDuration } from "@/lib/wav";
 import { saveAudio, loadAudio, deleteAudio } from "@/lib/audio-store";
 
@@ -110,6 +118,7 @@ function Index() {
   const [openTranscript, setOpenTranscript] = useState<Record<string, boolean>>({});
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [pending, setPending] = useState<{ duration: number } | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -117,6 +126,8 @@ function Index() {
   const pcmRef = useRef<Float32Array[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const syncedRef = useRef<Record<string, string>>({});
+  const elapsedBaseRef = useRef(0);
+  const pendingRef = useRef<{ chunks: Float32Array[]; sampleRate: number } | null>(null);
 
   useEffect(() => {
     try {
@@ -270,9 +281,11 @@ function Index() {
   useEffect(() => {
     if (!isRecording) return;
     const started = Date.now();
-    const timer = setInterval(() => setElapsed((Date.now() - started) / 1000), 250);
+    const base = elapsedBaseRef.current;
+    const timer = setInterval(() => setElapsed(base + (Date.now() - started) / 1000), 250);
     return () => clearInterval(timer);
   }, [isRecording]);
+
 
   useEffect(() => {
     const onScroll = () => setShowBack(window.scrollY > 400);
@@ -460,7 +473,7 @@ function Index() {
     [language, refine, summarize, update],
   );
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (resume = false) => {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       toast.error("Tento prohlížeč nahrávání nepodporuje. Zkuste Chrome nebo Safari.");
       return;
@@ -476,7 +489,7 @@ function Index() {
       const source = ctx.createMediaStreamSource(stream);
       const node = ctx.createScriptProcessor(4096, 1, 1);
       nodeRef.current = node;
-      pcmRef.current = [];
+      pcmRef.current = resume ? (pendingRef.current?.chunks ?? []) : [];
       node.onaudioprocess = (e) => {
         const data = e.inputBuffer.getChannelData(0);
         pcmRef.current.push(new Float32Array(data));
@@ -486,7 +499,8 @@ function Index() {
       };
       source.connect(node);
       node.connect(ctx.destination);
-      setElapsed(0);
+      if (!resume) elapsedBaseRef.current = 0;
+      setElapsed(elapsedBaseRef.current);
       setIsRecording(true);
     } catch (err) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -524,27 +538,59 @@ function Index() {
     await ctx?.close();
     ctxRef.current = null;
 
-    const blob = encodeWav(chunks, sampleRate);
-    if (blob.size < 2048) {
+    const total = chunks.reduce((sum, c) => sum + c.length, 0);
+    if (total / sampleRate < 0.3) {
       toast.error("Nahrávka byla prázdná – zkuste to prosím znovu.");
+      elapsedBaseRef.current = 0;
+      setElapsed(0);
       return;
     }
 
+    pendingRef.current = { chunks, sampleRate };
+    elapsedBaseRef.current = elapsed;
+    setPending({ duration: elapsed });
+  }, [elapsed]);
+
+  const savePending = useCallback(() => {
+    const held = pendingRef.current;
+    if (!held) return;
+    pendingRef.current = null;
+    setPending(null);
+    const blob = encodeWav(held.chunks, held.sampleRate);
+    const group = filter !== "all" && filter !== "none" ? filter : "";
     const id = crypto.randomUUID();
     const filename = `nahravka-${new Date().toISOString().slice(0, 16).replace(":", "-")}.wav`;
     const entry: Recording = {
       id,
       createdAt: Date.now(),
-      duration: elapsed,
+      duration: elapsedBaseRef.current,
       transcript: "",
       status: "running",
       hasAudio: true,
       audioName: filename,
+      group,
     };
     persist([entry, ...recordings]);
     void storeAudio(id, blob, filename);
     void transcribe(blob, id);
-  }, [elapsed, persist, recordings, storeAudio, transcribe]);
+    elapsedBaseRef.current = 0;
+    setElapsed(0);
+    toast.success(group ? `Uloženo do složky „${group}“.` : "Uloženo mezi nahrávky bez složky.");
+  }, [filter, persist, recordings, storeAudio, transcribe]);
+
+  const continuePending = useCallback(() => {
+    setPending(null);
+    void start(true);
+  }, [start]);
+
+  const discardPending = useCallback(() => {
+    pendingRef.current = null;
+    setPending(null);
+    elapsedBaseRef.current = 0;
+    setElapsed(0);
+    toast("Nahrávka zahozena.");
+  }, []);
+
 
   const importFile = useCallback(
     async (file: File) => {
@@ -763,7 +809,7 @@ function Index() {
                 />
               )}
               <Button
-                onClick={isRecording ? stop : start}
+                onClick={() => void (isRecording ? stop() : start())}
                 size="icon"
                 className="relative h-20 w-20 rounded-full"
                 variant={isRecording ? "destructive" : "default"}
@@ -1160,6 +1206,33 @@ function Index() {
           <ArrowUp className="h-5 w-5" />
         </Button>
       )}
+
+      <AlertDialog open={pending !== null}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Uložit nahrávku?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Nahrávka je dlouhá {formatDuration(pending?.duration ?? 0)}. Uložit ji{" "}
+              {filter !== "all" && filter !== "none"
+                ? `do složky „${filter}“`
+                : "mezi nahrávky bez složky"}
+              , nebo pokračovat v nahrávání?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:justify-between">
+            <Button variant="ghost" onClick={discardPending}>
+              Zahodit
+            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button variant="outline" onClick={continuePending}>
+                Pokračovat v nahrávání
+              </Button>
+              <Button onClick={savePending}>Uložit</Button>
+            </div>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
+
   );
 }
