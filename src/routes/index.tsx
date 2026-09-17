@@ -616,9 +616,9 @@ function Index() {
       .trim() || "nahravka";
 
   const exportAudio = async (rec: Recording) => {
-    const stored = await loadAudio(rec.id);
+    const stored = await getAudio(rec);
     if (!stored) {
-      toast.error("Zvukový záznam už není uložený v zařízení.");
+      toast.error("Zvukový záznam se nepodařilo najít.");
       return;
     }
     saveBlob(stored.blob, stored.filename || `${baseName(rec)}.wav`);
@@ -635,14 +635,15 @@ function Index() {
       });
       return;
     }
-    const stored = await loadAudio(rec.id);
+    const stored = await getAudio(rec);
     if (!stored) {
-      toast.error("Zvukový záznam už není uložený v zařízení.");
+      toast.error("Zvukový záznam se nepodařilo najít.");
       return;
     }
     const url = URL.createObjectURL(stored.blob);
     setAudioUrls((prev) => ({ ...prev, [rec.id]: url }));
   };
+
 
 
 
