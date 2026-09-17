@@ -461,11 +461,18 @@ function Index() {
   );
 
   const start = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      toast.error("Tento prohlížeč nahrávání nepodporuje. Zkuste Chrome nebo Safari.");
+      return;
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
       streamRef.current = stream;
       const ctx = new AudioContext();
       ctxRef.current = ctx;
+      if (ctx.state === "suspended") await ctx.resume();
       const source = ctx.createMediaStreamSource(stream);
       const node = ctx.createScriptProcessor(4096, 1, 1);
       nodeRef.current = node;
@@ -481,10 +488,28 @@ function Index() {
       node.connect(ctx.destination);
       setElapsed(0);
       setIsRecording(true);
-    } catch {
-      toast.error("Nepodařilo se získat přístup k mikrofonu.");
+    } catch (err) {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      const name = (err as { name?: string })?.name ?? "";
+      const inFrame = typeof window !== "undefined" && window.self !== window.top;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        toast.error(
+          inFrame
+            ? "Prohlížeč tu mikrofon nepovolil. Otevřete aplikaci v samostatné záložce a povolte mikrofon."
+            : "Mikrofon je zakázaný. Povolte ho v nastavení prohlížeče u této stránky a zkuste to znovu.",
+          { duration: 8000 },
+        );
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        toast.error("Nenašel jsem žádný mikrofon. Připojte ho a zkuste to znovu.");
+      } else if (name === "NotReadableError") {
+        toast.error("Mikrofon právě používá jiná aplikace. Zavřete ji a zkuste to znovu.");
+      } else {
+        toast.error("Nepodařilo se získat přístup k mikrofonu.");
+      }
     }
   }, []);
+
 
   const stop = useCallback(async () => {
     setIsRecording(false);
