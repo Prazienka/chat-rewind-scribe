@@ -292,6 +292,48 @@ function Index() {
     void transcribe(blob, id);
   }, [elapsed, persist, recordings, transcribe]);
 
+  const importFile = useCallback(
+    async (file: File) => {
+      if (file.size > 14 * 1024 * 1024) {
+        toast.error("Soubor je příliš velký (max 14 MB).");
+        return;
+      }
+      let duration = 0;
+      try {
+        duration = await new Promise<number>((resolve) => {
+          const audio = document.createElement("audio");
+          audio.preload = "metadata";
+          audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
+          audio.onerror = () => resolve(0);
+          audio.src = URL.createObjectURL(file);
+        });
+      } catch {
+        /* ignore */
+      }
+
+      const id = crypto.randomUUID();
+      const entry: Recording = {
+        id,
+        createdAt: Date.now(),
+        duration,
+        transcript: "",
+        status: "running",
+        title: file.name,
+      };
+      setRecordings((prev) => {
+        const next = [entry, ...prev];
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+      void transcribe(file, id, file.name);
+    },
+    [transcribe],
+  );
+
   const remove = (id: string) => persist(recordings.filter((r) => r.id !== id));
 
   const copy = async (text: string) => {
