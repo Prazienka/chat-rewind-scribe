@@ -831,6 +831,12 @@ function Index() {
                     <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                       Celý přepis
                     </summary>
+                    {rec.refineStatus === "running" && (
+                      <p className="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
+                        <WandSparkles className="h-3.5 w-3.5" />
+                        dolaďuji češtinu, jména a čísla…
+                      </p>
+                    )}
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
                       {rec.transcript}
                       {rec.status === "running" && (
@@ -840,6 +846,16 @@ function Index() {
                         </span>
                       )}
                     </p>
+                    {rec.rawTranscript && rec.rawTranscript !== rec.transcript && (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs text-muted-foreground">
+                          Původní strojový přepis
+                        </summary>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                          {rec.rawTranscript}
+                        </p>
+                      </details>
+                    )}
                   </details>
                 </>
               )}
@@ -847,6 +863,17 @@ function Index() {
           ))}
         </section>
       </div>
+
+      {showBack && (
+        <Button
+          size="icon"
+          aria-label="Zpět nahoru"
+          className="fixed bottom-6 right-6 h-11 w-11 rounded-full shadow-lg"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        >
+          <ArrowUp className="h-5 w-5" />
+        </Button>
+      )}
     </main>
   );
 }
