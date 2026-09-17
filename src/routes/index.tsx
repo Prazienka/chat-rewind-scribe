@@ -160,15 +160,23 @@ function Index() {
       } catch {
         /* ignore */
       }
-      if (forget) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData.session;
+      // Po návratu z Google se aplikace načte v nové záložce, kde sessionStorage chybí.
+      // Čerstvou session proto nikdy neodhlašujeme.
+      const fresh =
+        !!session &&
+        typeof session.expires_at === "number" &&
+        session.expires_at * 1000 - Date.now() > 45 * 60 * 1000;
+      if (forget && session && !fresh) {
         await supabase.auth.signOut();
         return;
       }
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionUser = sessionData.session?.user;
+      const sessionUser = session?.user;
       if (sessionUser && !cancelled) {
         setUser({ id: sessionUser.id, email: sessionUser.email ?? "" });
       }
+
 
       const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === "SIGNED_OUT") {
