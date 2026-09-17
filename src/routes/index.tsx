@@ -19,6 +19,10 @@ import {
   Music,
   FileText,
   WandSparkles,
+  Play,
+  X,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -87,6 +91,9 @@ function Index() {
   const [newGroup, setNewGroup] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
+  const [openTranscript, setOpenTranscript] = useState<Record<string, boolean>>({});
+
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -458,6 +465,28 @@ function Index() {
     saveBlob(stored.blob, stored.filename || `${baseName(rec)}.wav`);
   };
 
+  const togglePlayer = async (rec: Recording) => {
+    const existing = audioUrls[rec.id];
+    if (existing) {
+      URL.revokeObjectURL(existing);
+      setAudioUrls((prev) => {
+        const next = { ...prev };
+        delete next[rec.id];
+        return next;
+      });
+      return;
+    }
+    const stored = await loadAudio(rec.id);
+    if (!stored) {
+      toast.error("Zvukový záznam už není uložený v zařízení.");
+      return;
+    }
+    const url = URL.createObjectURL(stored.blob);
+    setAudioUrls((prev) => ({ ...prev, [rec.id]: url }));
+  };
+
+
+
   const exportText = (rec: Recording, kind: "transcript" | "summary") => {
     const text = kind === "transcript" ? rec.transcript : (rec.summary ?? "");
     if (!text.trim()) {
@@ -779,6 +808,29 @@ function Index() {
                 </Button>
               </div>
 
+              {rec.hasAudio && (
+                <div className="rounded-lg border border-border/60 p-3">
+                  <Button variant="outline" size="sm" onClick={() => void togglePlayer(rec)}>
+                    {audioUrls[rec.id] ? (
+                      <>
+                        <X className="mr-1.5 h-3.5 w-3.5" />
+                        Zavřít přehrávač
+                      </>
+                    ) : (
+                      <>
+                        <Play className="mr-1.5 h-3.5 w-3.5" />
+                        Přehrát záznam
+                      </>
+                    )}
+                  </Button>
+                  {audioUrls[rec.id] && (
+                    <audio className="mt-3 w-full" controls src={audioUrls[rec.id]} />
+                  )}
+                </div>
+              )}
+
+
+
 
               {rec.status === "error" ? (
                 <p className="text-sm text-destructive">{rec.error}</p>
@@ -834,36 +886,70 @@ function Index() {
                     )}
                   </div>
 
-                  <details className="rounded-lg border border-border/70 p-4">
-                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Celý přepis
-                    </summary>
+                  <div className="rounded-lg border border-border/70 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setOpenTranscript((prev) => ({ ...prev, [rec.id]: !prev[rec.id] }))
+                        }
+                      >
+                        {openTranscript[rec.id] ? (
+                          <>
+                            <EyeOff className="mr-1.5 h-3.5 w-3.5" />
+                            Skrýt celý přepis
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="mr-1.5 h-3.5 w-3.5" />
+                            Zobrazit celý přepis
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={rec.status !== "done"}
+                        onClick={() => exportText(rec, "transcript")}
+                      >
+                        <Download className="mr-1.5 h-3.5 w-3.5" />
+                        Exportovat přepis
+                      </Button>
+                    </div>
+
                     {rec.refineStatus === "running" && (
                       <p className="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
                         <WandSparkles className="h-3.5 w-3.5" />
                         dolaďuji češtinu, jména a čísla…
                       </p>
                     )}
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                      {rec.transcript}
-                      {rec.status === "running" && (
-                        <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          přepisuji…
-                        </span>
-                      )}
-                    </p>
-                    {rec.rawTranscript && rec.rawTranscript !== rec.transcript && (
-                      <details className="mt-3">
-                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                          Původní strojový přepis
-                        </summary>
-                        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                          {rec.rawTranscript}
+
+                    {openTranscript[rec.id] && (
+                      <>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                          {rec.transcript}
+                          {rec.status === "running" && (
+                            <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              přepisuji…
+                            </span>
+                          )}
                         </p>
-                      </details>
+                        {rec.rawTranscript && rec.rawTranscript !== rec.transcript && (
+                          <details className="mt-3">
+                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                              Původní strojový přepis
+                            </summary>
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                              {rec.rawTranscript}
+                            </p>
+                          </details>
+                        )}
+                      </>
                     )}
-                  </details>
+                  </div>
+
                 </>
               )}
             </Card>
