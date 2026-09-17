@@ -592,9 +592,13 @@ function Index() {
   );
 
   const remove = (id: string) => {
+    const rec = recordings.find((r) => r.id === id);
     void deleteAudio(id);
+    if (user) void deleteCloudRecording(id, rec?.audioPath || undefined).catch(() => {});
+    delete syncedRef.current[id];
     persist(recordings.filter((r) => r.id !== id));
   };
+
 
   const copy = async (text: string) => {
     await navigator.clipboard.writeText(text);
