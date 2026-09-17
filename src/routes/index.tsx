@@ -143,19 +143,34 @@ function Index() {
   }, []);
 
   useEffect(() => {
-    void supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setUser({ id: data.user.id, email: data.user.email ?? "" });
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT") {
-        setUser(null);
-        syncedRef.current = {};
-        return;
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    prefetchCloud();
+    void (async () => {
+      const supabase = await getSupabase();
+      if (cancelled) return;
+      // Session je uložená v prohlížeči, takže uživatel zůstane přihlášený.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionUser = sessionData.session?.user;
+      if (sessionUser && !cancelled) {
+        setUser({ id: sessionUser.id, email: sessionUser.email ?? "" });
       }
-      if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? "" });
-    });
-    return () => sub.subscription.unsubscribe();
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === "SIGNED_OUT") {
+          setUser(null);
+          syncedRef.current = {};
+          return;
+        }
+        if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? "" });
+      });
+      unsub = () => sub.subscription.unsubscribe();
+    })();
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, []);
+
 
   const persist = useCallback((next: Recording[]) => {
     setRecordings(next);
