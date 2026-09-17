@@ -478,15 +478,72 @@ function Index() {
               {rec.status === "error" ? (
                 <p className="text-sm text-destructive">{rec.error}</p>
               ) : (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                  {rec.transcript}
-                  {rec.status === "running" && (
-                    <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      přepisuji…
-                    </span>
-                  )}
-                </p>
+                <>
+                  <div className="rounded-lg border border-border/70 bg-muted/40 p-4">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        AI shrnutí
+                      </p>
+                      <div className="flex items-center gap-1">
+                        {rec.summaryStatus === "done" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Kopírovat shrnutí"
+                            onClick={() => copy(rec.summary ?? "")}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {rec.status === "done" && rec.summaryStatus !== "running" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Vytvořit shrnutí znovu"
+                            onClick={() => void summarize(rec.transcript, rec.id)}
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {rec.summaryStatus === "error" ? (
+                      <p className="text-sm text-destructive">{rec.summaryError}</p>
+                    ) : rec.summary ? (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                        {rec.summary}
+                      </p>
+                    ) : (
+                      <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                        {rec.summaryStatus === "running" || rec.status === "running" ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            připravuji shrnutí…
+                          </>
+                        ) : (
+                          "Shrnutí ještě není k dispozici."
+                        )}
+                      </p>
+                    )}
+                  </div>
+
+                  <details className="rounded-lg border border-border/70 p-4">
+                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Celý přepis
+                    </summary>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                      {rec.transcript}
+                      {rec.status === "running" && (
+                        <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          přepisuji…
+                        </span>
+                      )}
+                    </p>
+                  </details>
+                </>
               )}
             </Card>
           ))}
