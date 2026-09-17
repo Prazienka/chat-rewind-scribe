@@ -162,7 +162,7 @@ function AuthPage() {
 
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-5 py-12">
+    <div className="flex min-h-dvh items-center justify-center bg-background px-5 py-12">
       <Card className="w-full max-w-sm border-border/70 p-6">
         <h1 className="font-display text-2xl text-foreground">
           {mode === "in" ? "Přihlášení" : "Vytvořit účet"}
@@ -232,6 +232,6 @@ function AuthPage() {
           Zpět do aplikace
         </Link>
       </Card>
-    </main>
+    </div>
   );
 }

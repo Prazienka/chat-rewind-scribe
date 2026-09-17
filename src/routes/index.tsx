@@ -9,7 +9,6 @@ import {
   Pencil,
   Check,
   FolderPlus,
-  FolderOpen,
   ArrowUp,
   LogIn,
   LogOut,
@@ -23,6 +22,7 @@ import {
   AudioLines,
   CheckCircle2,
   AlertCircle,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -124,7 +124,6 @@ function Index() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
-  const [openTranscript, setOpenTranscript] = useState<Record<string, boolean>>({});
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [pending, setPending] = useState<{ duration: number } | null>(null);
@@ -150,11 +149,6 @@ function Index() {
       /* ignore */
     }
   }, []);
-
-  useEffect(() => {
-    const urls = audioUrls;
-    return () => Object.values(urls).forEach((url) => URL.revokeObjectURL(url));
-  }, [audioUrls]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -693,6 +687,15 @@ function Index() {
 
   const remove = (id: string) => {
     const rec = recordings.find((r) => r.id === id);
+    const audioUrl = audioUrls[id];
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrls((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
     void deleteAudio(id);
     if (user) void deleteCloudRecording(id, rec?.audioPath || undefined).catch(() => {});
     delete syncedRef.current[id];
@@ -836,7 +839,7 @@ function Index() {
   };
 
   return (
-    <main className="min-h-dvh bg-background pb-24 sm:pb-10">
+    <div className="min-h-dvh bg-background pb-24 sm:pb-10">
       <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto grid min-h-16 w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
           <a href="#record" className="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -1150,7 +1153,7 @@ function Index() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </main>
+    </div>
 
   );
 }
