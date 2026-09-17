@@ -220,13 +220,14 @@ function AuthPage() {
         </Button>
 
 
-        <button
+        <Button
           type="button"
-          className="mt-5 w-full text-sm text-muted-foreground underline"
+          variant="link"
+          className="mt-3 h-11 w-full text-muted-foreground"
           onClick={() => setMode(mode === "in" ? "up" : "in")}
         >
           {mode === "in" ? "Nemáte účet? Zaregistrujte se" : "Už máte účet? Přihlaste se"}
-        </button>
+        </Button>
 
         <Link to="/" className="mt-4 block text-center text-xs text-muted-foreground">
           Zpět do aplikace

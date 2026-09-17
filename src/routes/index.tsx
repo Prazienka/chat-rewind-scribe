@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   AlertCircle,
   FileText,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -960,7 +961,7 @@ function Index() {
                 {syncing ? <CloudUpload className="mt-0.5 size-4 shrink-0 animate-pulse" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />}
                 <span>{user ? (syncing ? "Synchronizuji vaše záznamy…" : "Záznamy jsou dostupné na vašich zařízeních.") : "Bez přihlášení zůstanou záznamy pouze v tomto zařízení."}</span>
               </div>
-            </div>
+            </aside>
           </div>
         </section>
 
