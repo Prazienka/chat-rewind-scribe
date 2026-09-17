@@ -15,6 +15,7 @@ import {
   Check,
   FolderPlus,
   FolderOpen,
+  ArrowUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,7 @@ function Index() {
   const [level, setLevel] = useState(0);
   const [groups, setGroups] = useState<string[]>([]);
   const [filter, setFilter] = useState("all");
+  const [showBack, setShowBack] = useState(false);
   const [newGroup, setNewGroup] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
