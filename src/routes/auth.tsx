@@ -60,6 +60,7 @@ function AuthPage() {
           toast.error("Přihlášení se nepodařilo. Zkontrolujte e-mail a heslo.");
           return;
         }
+        saveRemember();
         void navigate({ to: "/" });
       } else {
         const { data, error } = await supabase.auth.signUp({
@@ -76,6 +77,7 @@ function AuthPage() {
           return;
         }
         if (data.session) {
+          saveRemember();
           void navigate({ to: "/" });
         } else {
           toast.success("Poslali jsme vám potvrzovací e-mail. Klikněte na odkaz a pak se přihlaste.");
@@ -87,6 +89,7 @@ function AuthPage() {
   };
 
   const google = async () => {
+    saveRemember();
     const result = await lovable.auth.signInWithOAuth("google", {
       redirect_uri: window.location.origin,
     });
@@ -132,6 +135,15 @@ function AuthPage() {
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-primary"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            Zapamatovat si mě a zůstat přihlášen
+          </label>
           <Button type="submit" className="w-full" disabled={busy}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {mode === "in" ? "Přihlásit se" : "Zaregistrovat se"}
