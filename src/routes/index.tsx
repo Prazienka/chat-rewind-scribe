@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Mic,
@@ -23,8 +23,22 @@ import {
   X,
   Eye,
   EyeOff,
+  LogIn,
+  LogOut,
+  CloudUpload,
 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  fetchCloudRecordings,
+  upsertCloudRecording,
+  deleteCloudRecording,
+  uploadCloudAudio,
+  downloadCloudAudio,
+  fetchCloudGroups,
+  addCloudGroup,
+  deleteCloudGroup,
+} from "@/lib/cloud";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { encodeWav, formatDuration } from "@/lib/wav";
@@ -67,6 +81,7 @@ type Recording = {
   group?: string;
   hasAudio?: boolean;
   audioName?: string;
+  audioPath?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
@@ -93,13 +108,15 @@ function Index() {
   const [editingTitle, setEditingTitle] = useState("");
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
   const [openTranscript, setOpenTranscript] = useState<Record<string, boolean>>({});
-
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const nodeRef = useRef<ScriptProcessorNode | null>(null);
   const pcmRef = useRef<Float32Array[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const syncedRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     try {
@@ -110,6 +127,21 @@ function Index() {
     } catch {
       /* ignore */
     }
+  }, []);
+
+  useEffect(() => {
+    void supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setUser({ id: data.user.id, email: data.user.email ?? "" });
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+        syncedRef.current = {};
+        return;
+      }
+      if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? "" });
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
   const persist = useCallback((next: Recording[]) => {
@@ -132,6 +164,108 @@ function Index() {
       return next;
     });
   }, []);
+
+  // Po přihlášení stáhnout cloudová data a nahrát to, co je jen v zařízení.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setSyncing(true);
+    void (async () => {
+      try {
+        const [cloud, cloudGroups] = await Promise.all([
+          fetchCloudRecordings(),
+          fetchCloudGroups(),
+        ]);
+        if (cancelled) return;
+        for (const rec of cloud) syncedRef.current[rec.id] = JSON.stringify(rec);
+        setRecordings((prev) => {
+          const map = new Map<string, Recording>();
+          for (const rec of cloud) map.set(rec.id, rec as Recording);
+          for (const rec of prev) if (!map.has(rec.id)) map.set(rec.id, rec);
+          const merged = [...map.values()].sort((a, b) => b.createdAt - a.createdAt);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          } catch {
+            /* ignore */
+          }
+          return merged;
+        });
+        setGroups((prev) => {
+          const merged = [...new Set([...cloudGroups, ...prev])];
+          try {
+            localStorage.setItem(GROUPS_KEY, JSON.stringify(merged));
+          } catch {
+            /* ignore */
+          }
+          for (const name of merged) {
+            if (!cloudGroups.includes(name)) void addCloudGroup(user.id, name).catch(() => {});
+          }
+          return merged;
+        });
+      } catch {
+        toast.error("Nepodařilo se načíst nahrávky z cloudu.");
+      } finally {
+        if (!cancelled) setSyncing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // Průběžně posílat změny do cloudu.
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      for (const rec of recordings) {
+        if (rec.status === "running" || rec.summaryStatus === "running") continue;
+        const snapshot = JSON.stringify({
+          id: rec.id,
+          createdAt: rec.createdAt,
+          duration: rec.duration,
+          transcript: rec.transcript,
+          status: rec.status,
+          title: rec.title ?? "",
+          rawTranscript: rec.rawTranscript ?? "",
+          summary: rec.summary ?? "",
+          group: rec.group ?? "",
+          audioName: rec.audioName ?? "",
+          audioPath: rec.audioPath ?? "",
+        });
+        if (syncedRef.current[rec.id] === snapshot) continue;
+        syncedRef.current[rec.id] = snapshot;
+        void upsertCloudRecording(user.id, rec).catch(() => {
+          delete syncedRef.current[rec.id];
+        });
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [recordings, user]);
+
+  const storeAudio = useCallback(
+    async (id: string, blob: Blob, filename: string) => {
+      await saveAudio(id, blob, filename);
+      if (!user) return;
+      try {
+        const path = await uploadCloudAudio(user.id, id, blob, filename);
+        update(id, { audioPath: path });
+      } catch {
+        /* zvuk zůstane aspoň v zařízení */
+      }
+    },
+    [update, user],
+  );
+
+  const getAudio = useCallback(async (rec: Recording) => {
+    const local = await loadAudio(rec.id);
+    if (local) return local;
+    if (rec.audioPath) {
+      const blob = await downloadCloudAudio(rec.audioPath);
+      if (blob) return { blob, filename: rec.audioName || "nahravka.wav" };
+    }
+    return null;
+  }, []);
+
 
   useEffect(() => {
     if (!isRecording) return;
@@ -327,11 +461,18 @@ function Index() {
   );
 
   const start = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      toast.error("Tento prohlížeč nahrávání nepodporuje. Zkuste Chrome nebo Safari.");
+      return;
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
       streamRef.current = stream;
       const ctx = new AudioContext();
       ctxRef.current = ctx;
+      if (ctx.state === "suspended") await ctx.resume();
       const source = ctx.createMediaStreamSource(stream);
       const node = ctx.createScriptProcessor(4096, 1, 1);
       nodeRef.current = node;
@@ -347,10 +488,28 @@ function Index() {
       node.connect(ctx.destination);
       setElapsed(0);
       setIsRecording(true);
-    } catch {
-      toast.error("Nepodařilo se získat přístup k mikrofonu.");
+    } catch (err) {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      const name = (err as { name?: string })?.name ?? "";
+      const inFrame = typeof window !== "undefined" && window.self !== window.top;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        toast.error(
+          inFrame
+            ? "Prohlížeč tu mikrofon nepovolil. Otevřete aplikaci v samostatné záložce a povolte mikrofon."
+            : "Mikrofon je zakázaný. Povolte ho v nastavení prohlížeče u této stránky a zkuste to znovu.",
+          { duration: 8000 },
+        );
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        toast.error("Nenašel jsem žádný mikrofon. Připojte ho a zkuste to znovu.");
+      } else if (name === "NotReadableError") {
+        toast.error("Mikrofon právě používá jiná aplikace. Zavřete ji a zkuste to znovu.");
+      } else {
+        toast.error("Nepodařilo se získat přístup k mikrofonu.");
+      }
     }
   }, []);
+
 
   const stop = useCallback(async () => {
     setIsRecording(false);
@@ -383,9 +542,9 @@ function Index() {
       audioName: filename,
     };
     persist([entry, ...recordings]);
-    void saveAudio(id, blob, filename);
+    void storeAudio(id, blob, filename);
     void transcribe(blob, id);
-  }, [elapsed, persist, recordings, transcribe]);
+  }, [elapsed, persist, recordings, storeAudio, transcribe]);
 
   const importFile = useCallback(
     async (file: File) => {
@@ -426,16 +585,20 @@ function Index() {
         }
         return next;
       });
-      void saveAudio(id, file, file.name);
+      void storeAudio(id, file, file.name);
       void transcribe(file, id, file.name);
     },
-    [transcribe],
+    [storeAudio, transcribe],
   );
 
   const remove = (id: string) => {
+    const rec = recordings.find((r) => r.id === id);
     void deleteAudio(id);
+    if (user) void deleteCloudRecording(id, rec?.audioPath || undefined).catch(() => {});
+    delete syncedRef.current[id];
     persist(recordings.filter((r) => r.id !== id));
   };
+
 
   const copy = async (text: string) => {
     await navigator.clipboard.writeText(text);
@@ -457,9 +620,9 @@ function Index() {
       .trim() || "nahravka";
 
   const exportAudio = async (rec: Recording) => {
-    const stored = await loadAudio(rec.id);
+    const stored = await getAudio(rec);
     if (!stored) {
-      toast.error("Zvukový záznam už není uložený v zařízení.");
+      toast.error("Zvukový záznam se nepodařilo najít.");
       return;
     }
     saveBlob(stored.blob, stored.filename || `${baseName(rec)}.wav`);
@@ -476,14 +639,15 @@ function Index() {
       });
       return;
     }
-    const stored = await loadAudio(rec.id);
+    const stored = await getAudio(rec);
     if (!stored) {
-      toast.error("Zvukový záznam už není uložený v zařízení.");
+      toast.error("Zvukový záznam se nepodařilo najít.");
       return;
     }
     const url = URL.createObjectURL(stored.blob);
     setAudioUrls((prev) => ({ ...prev, [rec.id]: url }));
   };
+
 
 
 
@@ -515,6 +679,7 @@ function Index() {
       return;
     }
     persistGroups([...groups, name]);
+    if (user) void addCloudGroup(user.id, name).catch(() => {});
     setNewGroup("");
     setFilter(name);
     toast.success(`Skupina „${name}“ vytvořena.`);
@@ -522,9 +687,11 @@ function Index() {
 
   const removeGroup = (name: string) => {
     persistGroups(groups.filter((g) => g !== name));
+    if (user) void deleteCloudGroup(name).catch(() => {});
     persist(recordings.map((r) => (r.group === name ? { ...r, group: "" } : r)));
     setFilter("all");
   };
+
 
   const startRename = (rec: Recording) => {
     setEditingId(rec.id);
@@ -548,17 +715,43 @@ function Index() {
     <main className="min-h-screen bg-background">
       <div className="mx-auto w-full max-w-2xl px-5 py-10">
         <header className="mb-8">
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            Zápisník
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              Zápisník
+            </p>
+            {user ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {syncing && <CloudUpload className="h-3.5 w-3.5 animate-pulse" />}
+                <span className="max-w-[10rem] truncate">{user.email}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void supabase.auth.signOut()}
+                >
+                  <LogOut className="mr-1 h-3.5 w-3.5" />
+                  Odhlásit
+                </Button>
+              </div>
+            ) : (
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/auth">
+                  <LogIn className="mr-1 h-3.5 w-3.5" />
+                  Přihlásit se
+                </Link>
+              </Button>
+            )}
+          </div>
           <h1 className="mt-2 font-display text-3xl leading-tight text-foreground sm:text-4xl">
             Nahrajte rozhovor, přepis dodá AI
           </h1>
           <p className="mt-3 text-sm text-muted-foreground">
-            Stiskněte nahrávání, mluvte a po zastavení se text objeví sám. Vše zůstává jen ve vašem
-            zařízení.
+            Stiskněte nahrávání, mluvte a po zastavení se text objeví sám.{" "}
+            {user
+              ? "Vaše nahrávky se ukládají do cloudu a máte je na všech zařízeních."
+              : "Přihlaste se a nahrávky budete mít na všech svých zařízeních."}
           </p>
         </header>
+
 
         <Card className="border-border/70 bg-card p-6 shadow-sm">
           <div className="flex flex-col items-center gap-5">
