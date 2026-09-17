@@ -300,7 +300,8 @@ function Index() {
           update(id, { status: "error", error: "V nahrávce nebyla rozpoznána žádná řeč." });
         } else {
           update(id, { transcript: text, status: "done" });
-          void summarize(text, id);
+          const refined = await refine(text, id);
+          void summarize(refined, id);
         }
       } catch (err) {
         console.error(err);
@@ -308,7 +309,7 @@ function Index() {
         toast.error("Spojení se přerušilo.");
       }
     },
-    [language, summarize, update],
+    [language, refine, summarize, update],
   );
 
   const start = useCallback(async () => {
