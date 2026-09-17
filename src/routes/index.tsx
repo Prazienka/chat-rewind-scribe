@@ -542,9 +542,9 @@ function Index() {
       audioName: filename,
     };
     persist([entry, ...recordings]);
-    void saveAudio(id, blob, filename);
+    void storeAudio(id, blob, filename);
     void transcribe(blob, id);
-  }, [elapsed, persist, recordings, transcribe]);
+  }, [elapsed, persist, recordings, storeAudio, transcribe]);
 
   const importFile = useCallback(
     async (file: File) => {
