@@ -19,6 +19,10 @@ import {
   Music,
   FileText,
   WandSparkles,
+  Play,
+  X,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
