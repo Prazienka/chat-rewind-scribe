@@ -112,7 +112,7 @@ function Index() {
 
   const summarize = useCallback(
     async (text: string, id: string) => {
-      update(id, { summaryStatus: "running", summary: "", summaryError: undefined });
+      update(id, { summaryStatus: "running", summary: "", summaryError: "" });
       try {
         const res = await fetch("/api/summarize", {
           method: "POST",
