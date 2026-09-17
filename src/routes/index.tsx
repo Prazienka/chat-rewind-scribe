@@ -1,31 +1,29 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Mic,
   Square,
   Loader2,
-  Copy,
-  Download,
-  Trash2,
   FileAudio,
   Upload,
-  Sparkles,
-  RefreshCw,
   Pencil,
   Check,
   FolderPlus,
-  FolderOpen,
   ArrowUp,
-  Music,
-  FileText,
-  WandSparkles,
-  Play,
-  X,
-  Eye,
-  EyeOff,
   LogIn,
   LogOut,
   CloudUpload,
+  Search,
+  ChevronRight,
+  Settings2,
+  Library,
+  Circle,
+  Folder,
+  AudioLines,
+  CheckCircle2,
+  AlertCircle,
+  FileText,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -42,7 +40,17 @@ import {
 } from "@/lib/cloud-lazy";
 
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { RecordingDetail } from "@/components/recording-detail";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -57,13 +65,13 @@ import { saveAudio, loadAudio, deleteAudio } from "@/lib/audio-store";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Zápisník – nahrávání rozhovorů a AI přepisy" },
+      { title: "Chat Scribe – nahrávání rozhovorů a AI přepisy" },
       {
         name: "description",
         content:
           "Nahrajte rozhovor přímo v prohlížeči a nechte si ho automaticky přepsat do textu pomocí AI.",
       },
-      { property: "og:title", content: "Zápisník – nahrávání rozhovorů a AI přepisy" },
+      { property: "og:title", content: "Chat Scribe – nahrávání rozhovorů a AI přepisy" },
       {
         property: "og:description",
         content: "Nahrajte rozhovor a získejte přesný textový přepis za pár sekund.",
@@ -117,10 +125,11 @@ function Index() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
-  const [openTranscript, setOpenTranscript] = useState<Record<string, boolean>>({});
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [pending, setPending] = useState<{ duration: number } | null>(null);
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -130,6 +139,7 @@ function Index() {
   const syncedRef = useRef<Record<string, string>>({});
   const elapsedBaseRef = useRef(0);
   const pendingRef = useRef<{ chunks: Float32Array[]; sampleRate: number } | null>(null);
+  const audioUrlsRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     try {
@@ -141,6 +151,15 @@ function Index() {
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    audioUrlsRef.current = audioUrls;
+  }, [audioUrls]);
+
+  useEffect(
+    () => () => Object.values(audioUrlsRef.current).forEach((url) => URL.revokeObjectURL(url)),
+    [],
+  );
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -206,15 +225,22 @@ function Index() {
 
   const update = useCallback((id: string, patch: Partial<Recording>) => {
     setRecordings((prev) => {
-      const next = prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      return prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    });
+  }, []);
+
+  // AI posílá text po malých částech. Zápis do úložiště proto slučujeme,
+  // aby dlouhý přepis neblokoval ovládání aplikace při každém slově.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(recordings));
       } catch {
         /* ignore */
       }
-      return next;
-    });
-  }, []);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [recordings]);
 
   // Po přihlášení stáhnout cloudová data a nahrát to, co je jen v zařízení.
   useEffect(() => {
@@ -679,6 +705,15 @@ function Index() {
 
   const remove = (id: string) => {
     const rec = recordings.find((r) => r.id === id);
+    const audioUrl = audioUrls[id];
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrls((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
     void deleteAudio(id);
     if (user) void deleteCloudRecording(id, rec?.audioPath || undefined).catch(() => {});
     delete syncedRef.current[id];
@@ -790,104 +825,156 @@ function Index() {
     setEditingId(null);
   };
 
-  const visible =
-    filter === "all"
-      ? recordings
-      : filter === "none"
-        ? recordings.filter((r) => !r.group)
-        : recordings.filter((r) => r.group === filter);
+  const visible = useMemo(() => {
+    const normalizedSearch = search.trim().toLocaleLowerCase("cs");
+    return recordings.filter((recording) => {
+      const inGroup =
+        filter === "all" ||
+        (filter === "none" && !recording.group) ||
+        recording.group === filter;
+      if (!inGroup) return false;
+      if (!normalizedSearch) return true;
+      return [recording.title, recording.transcript, recording.summary, recording.group]
+        .filter(Boolean)
+        .some((value) => value?.toLocaleLowerCase("cs").includes(normalizedSearch));
+    });
+  }, [filter, recordings, search]);
+
+  const selected = useMemo(
+    () => recordings.find((recording) => recording.id === selectedId) ?? null,
+    [recordings, selectedId],
+  );
+
+  const processingCount = useMemo(
+    () =>
+      recordings.filter(
+        (recording) =>
+          recording.status === "running" ||
+          recording.refineStatus === "running" ||
+          recording.summaryStatus === "running",
+      ).length,
+    [recordings],
+  );
+
+  const groupCounts = useMemo(
+    () =>
+      recordings.reduce<Record<string, number>>((counts, recording) => {
+        if (recording.group) counts[recording.group] = (counts[recording.group] ?? 0) + 1;
+        return counts;
+      }, {}),
+    [recordings],
+  );
+
+  const openRecording = (id: string) => {
+    setSelectedId(id);
+    window.requestAnimationFrame(() => {
+      document.getElementById("recording-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
 
   return (
-    <main className="min-h-screen bg-background">
-      <div className="mx-auto w-full max-w-2xl px-5 py-10">
-        <header className="mb-8">
-          <div className="flex items-start justify-between gap-4">
-            <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-              Zápisník
-            </p>
+    <div className="min-h-dvh bg-background pb-24 sm:pb-10">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
+        <div className="mx-auto grid min-h-16 w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
+          <a href="#record" className="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span className="grid size-10 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground"><AudioLines className="size-5" aria-hidden="true" /></span>
+            <span className="min-w-0">
+              <span className="block truncate font-display text-base font-semibold text-foreground">Chat Scribe</span>
+              <span className="block truncate text-xs text-muted-foreground">Rozhovory → přepisy → shrnutí</span>
+            </span>
+          </a>
+          <div className="flex shrink-0 items-center gap-1">
+            <nav className="hidden items-center gap-1 md:flex" aria-label="Hlavní navigace">
+              <Button variant="ghost" asChild><a href="#record"><Mic aria-hidden="true" /> Nahrávat</a></Button>
+              <Button variant="ghost" asChild><a href="#transcripts"><Library aria-hidden="true" /> Přepisy</a></Button>
+              <Button variant="ghost" asChild><a href="#settings"><Settings2 aria-hidden="true" /> Nastavení</a></Button>
+            </nav>
             {user ? (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                {syncing && <CloudUpload className="h-3.5 w-3.5 animate-pulse" />}
-                <span className="max-w-[10rem] truncate">{user.email}</span>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span className="hidden max-w-32 truncate lg:inline">{user.email}</span>
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon"
+                  className="min-h-11 min-w-11"
+                  aria-label="Odhlásit se"
                   onClick={() =>
                     void getSupabase().then((sb) => sb.auth.signOut())
                   }
-
                 >
-                  <LogOut className="mr-1 h-3.5 w-3.5" />
-                  Odhlásit
+                  <LogOut aria-hidden="true" />
                 </Button>
               </div>
             ) : (
-              <Button variant="outline" size="sm" asChild>
+              <Button variant="outline" className="min-h-11" asChild>
                 <Link to="/auth">
-                  <LogIn className="mr-1 h-3.5 w-3.5" />
-                  Přihlásit se
+                  <LogIn aria-hidden="true" /><span className="hidden sm:inline">Přihlásit se</span>
                 </Link>
               </Button>
             )}
           </div>
-          <h1 className="mt-2 font-display text-3xl leading-tight text-foreground sm:text-4xl">
-            Nahrajte rozhovor, přepis dodá AI
-          </h1>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Stiskněte nahrávání, mluvte a po zastavení se text objeví sám.{" "}
-            {user
-              ? "Vaše nahrávky se ukládají do cloudu a máte je na všech zařízeních."
-              : "Přihlaste se a nahrávky budete mít na všech svých zařízeních."}
-          </p>
-        </header>
+        </div>
+      </header>
 
+      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        <section id="record" className="scroll-mt-24 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+          <div className="grid lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)]">
+            <div className="flex flex-col items-center justify-center p-6 text-center sm:p-10">
+              <p className="mb-2 text-sm font-medium text-primary">Nová nahrávka</p>
+              <h1 className="font-display text-2xl font-semibold text-foreground sm:text-3xl">Zachyťte rozhovor. O zbytek se postará AI.</h1>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">Po zastavení nahrávku uložíte a přepis, jazyková korektura i shrnutí se připraví automaticky.</p>
 
-        <Card className="border-border/70 bg-card p-6 shadow-sm">
-          <div className="flex flex-col items-center gap-5">
-            <div className="relative flex h-28 w-28 items-center justify-center">
+              <div className="relative mt-7 flex h-32 w-32 items-center justify-center">
               {isRecording && (
                 <span
-                  className="absolute inset-0 rounded-full bg-primary/15 transition-transform duration-100"
+                    className="absolute inset-0 rounded-full bg-destructive/10 transition-transform duration-100 motion-reduce:transform-none"
                   style={{ transform: `scale(${1 + Math.min(level, 0.6)})` }}
                 />
               )}
               <Button
                 onClick={() => void (isRecording ? stop() : start())}
                 size="icon"
-                className="relative h-20 w-20 rounded-full"
+                  className="relative h-24 w-24 rounded-full shadow-lg"
                 variant={isRecording ? "destructive" : "default"}
                 aria-label={isRecording ? "Zastavit nahrávání" : "Začít nahrávat"}
               >
-                {isRecording ? <Square className="h-7 w-7" /> : <Mic className="h-7 w-7" />}
+                  {isRecording ? <Square className="size-8" aria-hidden="true" /> : <Mic className="size-8" aria-hidden="true" />}
               </Button>
             </div>
-
-            <p className="font-display text-2xl tabular-nums text-foreground">
+              <p className="mt-1 font-display text-3xl font-semibold tabular-nums text-foreground" aria-live="off">
               {formatDuration(elapsed)}
-            </p>
+              </p>
+              <div className="mt-2 flex items-center gap-2 text-sm" aria-live="polite">
+                <Circle className={`size-2.5 ${isRecording ? "fill-destructive text-destructive" : "fill-muted-foreground text-muted-foreground"}`} aria-hidden="true" />
+                <span className={isRecording ? "font-medium text-destructive" : "text-muted-foreground"}>{isRecording ? "Nahrávání probíhá — klepnutím zastavíte" : "Připraveno k nahrávání"}</span>
+              </div>
+              {isRecording ? <Progress value={Math.min(100, level * 180)} className="mt-5 max-w-sm" aria-label="Hlasitost mikrofonu" /> : null}
+            </div>
 
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              Jazyk
-              <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                disabled={isRecording}
-                className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
-              >
-                {LANGS.map((l) => (
-                  <option key={l.value} value={l.value}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <aside id="settings" className="scroll-mt-24 border-t border-border bg-muted/30 p-5 lg:border-l lg:border-t-0 sm:p-6">
+              <div className="flex items-center gap-2"><Settings2 className="size-4 text-primary" aria-hidden="true" /><h2 className="font-display text-base font-semibold text-foreground">Nastavení nahrávky</h2></div>
+              <div className="mt-5 space-y-5">
+                <div className="space-y-2">
+                  <label htmlFor="language" className="text-sm font-medium text-foreground">Jazyk rozhovoru</label>
+                  <Select value={language} onValueChange={setLanguage} disabled={isRecording}>
+                    <SelectTrigger id="language" className="h-11 bg-background"><SelectValue /></SelectTrigger>
+                    <SelectContent>{LANGS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="recording-folder" className="text-sm font-medium text-foreground">Uložit do složky</label>
+                  <Select value={filter === "all" ? "none" : filter} onValueChange={(value) => setFilter(value)} disabled={isRecording}>
+                    <SelectTrigger id="recording-folder" className="h-11 bg-background"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="none">Bez složky</SelectItem>{groups.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <p className="text-xs leading-5 text-muted-foreground">Nová nahrávka se uloží rovnou do vybrané složky.</p>
+                </div>
+              </div>
 
-            <div className="w-full border-t border-border/60 pt-4 text-center">
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="audio/*,video/webm,video/mp4"
-                className="hidden"
+                className="sr-only"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.target.value = "";
@@ -896,51 +983,56 @@ function Index() {
               />
               <Button
                 variant="outline"
+                className="mt-6 min-h-11 w-full bg-background"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isRecording}
               >
-                <Upload className="mr-2 h-4 w-4" />
-                Nahrát zvukový soubor
+                <Upload aria-hidden="true" /> Importovat zvuk
               </Button>
-              <p className="mt-2 text-xs text-muted-foreground">
-                MP3, WAV, M4A a další, do 14 MB.
-              </p>
-            </div>
+              <p className="mt-2 text-center text-xs text-muted-foreground">MP3, WAV, M4A a další · max. 14 MB</p>
+              <div className="mt-5 flex items-start gap-2 border-t border-border pt-5 text-xs leading-5 text-muted-foreground">
+                {syncing ? <CloudUpload className="mt-0.5 size-4 shrink-0 animate-pulse" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />}
+                <span>{user ? (syncing ? "Synchronizuji vaše záznamy…" : "Záznamy jsou dostupné na vašich zařízeních.") : "Bez přihlášení zůstanou záznamy pouze v tomto zařízení."}</span>
+              </div>
+            </aside>
           </div>
-        </Card>
+        </section>
 
+        <section id="transcripts" className="mt-8 scroll-mt-24">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
+            <div className="min-w-0"><p className="text-sm font-medium text-primary">Knihovna</p><h2 className="truncate font-display text-2xl font-semibold text-foreground">Nahrávky a přepisy</h2></div>
+            <Badge variant="secondary">{recordings.length} {recordings.length === 1 ? "záznam" : "záznamů"}</Badge>
+          </div>
 
-        <section className="mt-10 space-y-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Vaše nahrávky
-          </h2>
-
-          <Card className="space-y-3 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <FolderOpen className="h-4 w-4 text-muted-foreground" />
+          <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+            <label className="relative block min-w-0">
+              <Search className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" aria-hidden="true" />
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} className="h-11 bg-card pl-9" placeholder="Hledat v názvech, přepisech a shrnutích…" aria-label="Hledat v nahrávkách a přepisech" />
+            </label>
+            <div className="flex max-w-full items-center gap-2 overflow-x-auto pb-1" role="group" aria-label="Filtrovat podle složky">
               <Button
                 variant={filter === "all" ? "default" : "outline"}
-                size="sm"
+                className="min-h-11 shrink-0"
                 onClick={() => setFilter("all")}
               >
                 Vše
               </Button>
               {groups.map((g) => (
-                <span key={g} className="flex items-center">
+                <span key={g} className="flex shrink-0 items-center">
                   <Button
                     variant={filter === g ? "default" : "outline"}
-                    size="sm"
+                    className="min-h-11"
                     onClick={() => setFilter(g)}
                   >
-                    {g}
+                    <Folder aria-hidden="true" />{g}
                     <span className="ml-1 text-xs opacity-70">
-                      {recordings.filter((r) => r.group === g).length}
+                      {groupCounts[g] ?? 0}
                     </span>
                   </Button>
                   {filter === g && (
                     <Button
                       variant="ghost"
-                      size="icon"
+                      size="icon" className="min-h-11 min-w-11"
                       aria-label={`Smazat skupinu ${g}`}
                       onClick={() => removeGroup(g)}
                     >
@@ -949,52 +1041,45 @@ function Index() {
                   )}
                 </span>
               ))}
-              <Button
-                variant={filter === "none" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilter("none")}
-              >
-                Bez skupiny
-              </Button>
+              <Button variant={filter === "none" ? "default" : "outline"} className="min-h-11 shrink-0" onClick={() => setFilter("none")}>Bez složky</Button>
             </div>
+          </div>
 
-            <div className="flex items-center gap-2">
-              <input
+          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <Input
                 value={newGroup}
                 onChange={(e) => setNewGroup(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") addGroup();
                 }}
-                placeholder="Název nové skupiny"
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground"
+                placeholder="Název nové složky"
+                aria-label="Název nové složky"
+                className="h-11 bg-card"
               />
-              <Button variant="outline" size="sm" onClick={addGroup}>
-                <FolderPlus className="mr-2 h-4 w-4" />
-                Přidat
+              <Button variant="outline" className="min-h-11" onClick={addGroup}>
+                <FolderPlus aria-hidden="true" /> Přidat složku
               </Button>
-            </div>
-          </Card>
+          </div>
 
           {visible.length === 0 && recordings.length > 0 && (
-            <Card className="border-dashed bg-card/50 p-8 text-center">
-              <p className="text-sm text-muted-foreground">V této skupině není žádná nahrávka.</p>
-            </Card>
+            <div className="mt-5 rounded-lg border border-dashed border-border bg-card p-10 text-center"><Search className="mx-auto size-6 text-muted-foreground" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Nic jsme nenašli</p><p className="mt-1 text-sm text-muted-foreground">Zkuste jiný výraz nebo jinou složku.</p></div>
           )}
 
           {recordings.length === 0 && (
-            <Card className="flex flex-col items-center gap-2 border-dashed bg-card/50 p-10 text-center">
-              <FileAudio className="h-6 w-6 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Zatím tu nic není.</p>
-            </Card>
+            <div className="mt-5 flex flex-col items-center rounded-lg border border-dashed border-border bg-card p-10 text-center"><FileAudio className="size-8 text-primary" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Vaše první nahrávka začne tady</p><p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">Klepněte nahoře na mikrofon, nahrajte rozhovor a po zastavení se zde objeví přepis.</p><Button className="mt-5 min-h-11" asChild><a href="#record"><Mic aria-hidden="true" /> Začít nahrávat</a></Button></div>
           )}
 
-          {visible.map((rec) => (
-            <Card key={rec.id} className="space-y-3 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
+          <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.25fr)]">
+            <div className="space-y-2" aria-label="Seznam nahrávek">
+            {visible.map((rec) => {
+              const isProcessing = rec.status === "running" || rec.refineStatus === "running" || rec.summaryStatus === "running";
+              return (
+              <article key={rec.id} className={`rounded-lg border bg-card p-4 shadow-sm transition-colors ${selectedId === rec.id ? "border-primary" : "border-border hover:border-primary/50"}`}>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                  <div className="min-w-0">
                   {editingId === rec.id ? (
                     <div className="flex items-center gap-2">
-                      <input
+                      <Input
                         autoFocus
                         value={editingTitle}
                         onChange={(e) => setEditingTitle(e.target.value)}
@@ -1002,248 +1087,75 @@ function Index() {
                           if (e.key === "Enter") saveRename(rec.id);
                           if (e.key === "Escape") setEditingId(null);
                         }}
-                        className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
+                        aria-label="Název nahrávky"
+                        className="h-11 min-w-0 flex-1"
                       />
-                      <Button size="sm" onClick={() => saveRename(rec.id)}>
-                        <Check className="h-4 w-4" />
+                      <Button size="icon" className="min-h-11 min-w-11" aria-label="Uložit nový název" onClick={() => saveRename(rec.id)}>
+                        <Check aria-hidden="true" />
                       </Button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
                       onClick={() => startRename(rec)}
-                      className="flex w-full items-center gap-2 text-left"
+                      className="h-auto max-w-full justify-start gap-2 p-0 text-left hover:bg-transparent"
                     >
                       <span className="truncate text-sm font-medium text-foreground">
                         {rec.title || new Date(rec.createdAt).toLocaleString("cs-CZ")}
                       </span>
-                      <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    </button>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {rec.title ? `${new Date(rec.createdAt).toLocaleString("cs-CZ")} · ` : ""}
-                    Délka {formatDuration(rec.duration)}
-                  </p>
-                  <select
-                    value={rec.group ?? ""}
-                    onChange={(e) => update(rec.id, { group: e.target.value })}
-                    className="mt-2 rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground"
-                  >
-                    <option value="">Bez skupiny</option>
-                    {groups.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-1">
-                  {rec.status === "done" && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Kopírovat přepis"
-                      onClick={() => copy(rec.transcript)}
-                    >
-                      <Copy className="h-4 w-4" />
+                      <Pencil className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                     </Button>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Smazat nahrávku"
-                    onClick={() => remove(rec.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/30 p-3">
-                <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <Download className="h-3.5 w-3.5" />
-                  Export
-                </span>
-                {rec.hasAudio && (
-                  <Button variant="outline" size="sm" onClick={() => void exportAudio(rec)}>
-                    <Music className="mr-1.5 h-3.5 w-3.5" />
-                    Zvuk
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rec.status !== "done"}
-                  onClick={() => exportText(rec, "transcript")}
-                >
-                  <FileText className="mr-1.5 h-3.5 w-3.5" />
-                  Celý přepis
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={rec.summaryStatus !== "done"}
-                  onClick={() => exportText(rec, "summary")}
-                >
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                  AI shrnutí
-                </Button>
-              </div>
-
-              {rec.hasAudio && (
-                <div className="rounded-lg border border-border/60 p-3">
-                  <Button variant="outline" size="sm" onClick={() => void togglePlayer(rec)}>
-                    {audioUrls[rec.id] ? (
-                      <>
-                        <X className="mr-1.5 h-3.5 w-3.5" />
-                        Zavřít přehrávač
-                      </>
-                    ) : (
-                      <>
-                        <Play className="mr-1.5 h-3.5 w-3.5" />
-                        Přehrát záznam
-                      </>
-                    )}
-                  </Button>
-                  {audioUrls[rec.id] && (
-                    <audio className="mt-3 w-full" controls src={audioUrls[rec.id]} />
-                  )}
-                </div>
-              )}
-
-
-
-
-              {rec.status === "error" ? (
-                <p className="text-sm text-destructive">{rec.error}</p>
-              ) : (
-                <>
-                  <div className="rounded-lg border border-border/70 bg-muted/40 p-4">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        <Sparkles className="h-3.5 w-3.5" />
-                        AI shrnutí
-                      </p>
-                      <div className="flex items-center gap-1">
-                        {rec.summaryStatus === "done" && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Kopírovat shrnutí"
-                            onClick={() => copy(rec.summary ?? "")}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {rec.status === "done" && rec.summaryStatus !== "running" && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Vytvořit shrnutí znovu"
-                            onClick={() => void summarize(rec.transcript, rec.id)}
-                          >
-                            <RefreshCw className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-
-                    {rec.summaryStatus === "error" ? (
-                      <p className="text-sm text-destructive">{rec.summaryError}</p>
-                    ) : rec.summary ? (
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                        {rec.summary}
-                      </p>
-                    ) : (
-                      <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-                        {rec.summaryStatus === "running" || rec.status === "running" ? (
-                          <>
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            připravuji shrnutí…
-                          </>
-                        ) : (
-                          "Shrnutí ještě není k dispozici."
-                        )}
-                      </p>
-                    )}
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {new Date(rec.createdAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "short", year: "numeric" })} · {formatDuration(rec.duration)}{rec.group ? ` · ${rec.group}` : ""}
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    {isProcessing ? <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" /> : rec.status === "error" ? <AlertCircle className="size-4 text-destructive" aria-hidden="true" /> : <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />}
+                    <span className={`text-xs font-medium ${rec.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>{rec.status === "error" ? "Přepis selhal" : rec.status === "running" ? "Přepisuji zvuk…" : rec.refineStatus === "running" ? "Upravuji češtinu…" : rec.summaryStatus === "running" ? "Tvořím shrnutí…" : "Přepis je připravený"}</span>
                   </div>
+                  {isProcessing ? <Progress value={rec.status === "running" ? 35 : rec.refineStatus === "running" ? 65 : 85} className="mt-2 h-1.5" aria-label="Průběh zpracování" /> : null}
+                </div>
+                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`Otevřít ${rec.title || "nahrávku"}`} onClick={() => openRecording(rec.id)}><ChevronRight aria-hidden="true" /></Button>
+              </div>
+              </article>
+            )})}
+            </div>
 
-                  <div className="rounded-lg border border-border/70 p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setOpenTranscript((prev) => ({ ...prev, [rec.id]: !prev[rec.id] }))
-                        }
-                      >
-                        {openTranscript[rec.id] ? (
-                          <>
-                            <EyeOff className="mr-1.5 h-3.5 w-3.5" />
-                            Skrýt celý přepis
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="mr-1.5 h-3.5 w-3.5" />
-                            Zobrazit celý přepis
-                          </>
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={rec.status !== "done"}
-                        onClick={() => exportText(rec, "transcript")}
-                      >
-                        <Download className="mr-1.5 h-3.5 w-3.5" />
-                        Exportovat přepis
-                      </Button>
-                    </div>
-
-                    {rec.refineStatus === "running" && (
-                      <p className="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
-                        <WandSparkles className="h-3.5 w-3.5" />
-                        dolaďuji češtinu, jména a čísla…
-                      </p>
-                    )}
-
-                    {openTranscript[rec.id] && (
-                      <>
-                        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                          {rec.transcript}
-                          {rec.status === "running" && (
-                            <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              přepisuji…
-                            </span>
-                          )}
-                        </p>
-                        {rec.rawTranscript && rec.rawTranscript !== rec.transcript && (
-                          <details className="mt-3">
-                            <summary className="cursor-pointer text-xs text-muted-foreground">
-                              Původní strojový přepis
-                            </summary>
-                            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                              {rec.rawTranscript}
-                            </p>
-                          </details>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                </>
-              )}
-            </Card>
-          ))}
+            <div id="recording-detail" className="scroll-mt-24 lg:sticky lg:top-24">
+              {selected ? (
+                <RecordingDetail
+                  key={selected.id}
+                  recording={selected}
+                  audioUrl={audioUrls[selected.id]}
+                  onClose={() => setSelectedId(null)}
+                  onCopy={(text) => void copy(text)}
+                  onDelete={() => { remove(selected.id); setSelectedId(null); }}
+                  onExportAudio={() => void exportAudio(selected)}
+                  onExportTranscript={() => exportText(selected, "transcript")}
+                  onExportSummary={() => exportText(selected, "summary")}
+                  onRefreshSummary={() => void summarize(selected.transcript, selected.id)}
+                  onTogglePlayer={() => void togglePlayer(selected)}
+                  onUpdateTranscript={(text) => update(selected.id, { transcript: text, status: "done" })}
+                />
+              ) : visible.length > 0 ? (
+                <div className="hidden min-h-80 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card p-8 text-center lg:flex"><FileText className="size-8 text-primary" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Otevřete některý přepis</p><p className="mt-1 max-w-xs text-sm leading-6 text-muted-foreground">Vyberte nahrávku vlevo a zobrazí se shrnutí, celý text i všechny exporty.</p></div>
+              ) : null}
+            </div>
+          </div>
         </section>
       </div>
+
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-border bg-background/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur md:hidden" aria-label="Mobilní navigace">
+        <Button variant="ghost" className="h-12 flex-col gap-1 text-xs" asChild><a href="#record"><Mic aria-hidden="true" />Nahrávat</a></Button>
+        <Button variant="ghost" className="h-12 flex-col gap-1 text-xs" asChild><a href="#transcripts"><Library aria-hidden="true" />Přepisy{processingCount > 0 ? <span className="sr-only">, {processingCount} se zpracovává</span> : null}</a></Button>
+        <Button variant="ghost" className="h-12 flex-col gap-1 text-xs" asChild><a href="#settings"><Settings2 aria-hidden="true" />Nastavení</a></Button>
+      </nav>
 
       {showBack && (
         <Button
           size="icon"
           aria-label="Zpět nahoru"
-          className="fixed bottom-6 right-6 h-11 w-11 rounded-full shadow-lg"
+          className="fixed bottom-24 right-4 h-11 w-11 rounded-full shadow-lg sm:bottom-6 sm:right-6"
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         >
           <ArrowUp className="h-5 w-5" />
@@ -1275,7 +1187,7 @@ function Index() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </main>
+    </div>
 
   );
 }

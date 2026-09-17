@@ -12,13 +12,13 @@ import { Loader2 } from "lucide-react";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Přihlášení – Zápisník" },
+      { title: "Přihlášení – Chat Scribe" },
       {
         name: "description",
         content:
-          "Přihlaste se do Zápisníku a mějte své nahrávky, přepisy i AI shrnutí ve všech zařízeních.",
+          "Přihlaste se do Chat Scribe a mějte své nahrávky, přepisy i AI shrnutí ve všech zařízeních.",
       },
-      { property: "og:title", content: "Přihlášení – Zápisník" },
+      { property: "og:title", content: "Přihlášení – Chat Scribe" },
       {
         property: "og:description",
         content: "Nahrávky a přepisy dostupné na všech vašich zařízeních.",
@@ -162,7 +162,7 @@ function AuthPage() {
 
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-5 py-12">
+    <div className="flex min-h-dvh items-center justify-center bg-background px-5 py-12">
       <Card className="w-full max-w-sm border-border/70 p-6">
         <h1 className="font-display text-2xl text-foreground">
           {mode === "in" ? "Přihlášení" : "Vytvořit účet"}
@@ -220,18 +220,19 @@ function AuthPage() {
         </Button>
 
 
-        <button
+        <Button
           type="button"
-          className="mt-5 w-full text-sm text-muted-foreground underline"
+          variant="link"
+          className="mt-3 h-11 w-full text-muted-foreground"
           onClick={() => setMode(mode === "in" ? "up" : "in")}
         >
           {mode === "in" ? "Nemáte účet? Zaregistrujte se" : "Už máte účet? Přihlaste se"}
-        </button>
+        </Button>
 
         <Link to="/" className="mt-4 block text-center text-xs text-muted-foreground">
           Zpět do aplikace
         </Link>
       </Card>
-    </main>
+    </div>
   );
 }
