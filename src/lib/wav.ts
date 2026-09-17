@@ -12,7 +12,7 @@ export function encodeWav(chunks: Float32Array[], sampleRate: number, targetRate
   const outLength = ratio > 1 ? Math.floor(merged.length / ratio) : merged.length;
   const out = new Float32Array(outLength);
   if (ratio > 1) {
-    for (let i = 0; i < outLength; i++) out[i] = merged[Math.floor(i * ratio)];
+    for (let i = 0; i < outLength; i++) out[i] = merged[Math.floor(i * ratio)] ?? 0;
   } else {
     out.set(merged.subarray(0, outLength));
   }
@@ -40,7 +40,7 @@ export function encodeWav(chunks: Float32Array[], sampleRate: number, targetRate
 
   let pos = 44;
   for (let i = 0; i < out.length; i++) {
-    const s = Math.max(-1, Math.min(1, out[i]));
+    const s = Math.max(-1, Math.min(1, out[i] ?? 0));
     view.setInt16(pos, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     pos += 2;
   }

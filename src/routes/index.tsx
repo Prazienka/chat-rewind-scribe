@@ -174,7 +174,7 @@ function Index() {
         const data = e.inputBuffer.getChannelData(0);
         pcmRef.current.push(new Float32Array(data));
         let peak = 0;
-        for (let i = 0; i < data.length; i += 64) peak = Math.max(peak, Math.abs(data[i]));
+        for (let i = 0; i < data.length; i += 64) peak = Math.max(peak, Math.abs(data[i] ?? 0));
         setLevel(peak);
       };
       source.connect(node);
