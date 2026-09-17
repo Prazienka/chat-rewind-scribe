@@ -28,8 +28,9 @@ import {
   CloudUpload,
 } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import {
+  getSupabase,
+  prefetchCloud,
   fetchCloudRecordings,
   upsertCloudRecording,
   deleteCloudRecording,
@@ -38,7 +39,8 @@ import {
   fetchCloudGroups,
   addCloudGroup,
   deleteCloudGroup,
-} from "@/lib/cloud";
+} from "@/lib/cloud-lazy";
+
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -141,19 +143,49 @@ function Index() {
   }, []);
 
   useEffect(() => {
-    void supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setUser({ id: data.user.id, email: data.user.email ?? "" });
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT") {
-        setUser(null);
-        syncedRef.current = {};
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    prefetchCloud();
+    void (async () => {
+      const supabase = await getSupabase();
+      if (cancelled) return;
+      // Session je uložená v prohlížeči, takže uživatel zůstane přihlášený.
+      // Pokud si přihlášení zapamatovat nechtěl, po zavření aplikace ho odhlásíme.
+      let forget = false;
+      try {
+        forget =
+          localStorage.getItem("zapisnik.remember") === "0" &&
+          !sessionStorage.getItem("zapisnik.session-alive");
+        sessionStorage.setItem("zapisnik.session-alive", "1");
+      } catch {
+        /* ignore */
+      }
+      if (forget) {
+        await supabase.auth.signOut();
         return;
       }
-      if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? "" });
-    });
-    return () => sub.subscription.unsubscribe();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionUser = sessionData.session?.user;
+      if (sessionUser && !cancelled) {
+        setUser({ id: sessionUser.id, email: sessionUser.email ?? "" });
+      }
+
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === "SIGNED_OUT") {
+          setUser(null);
+          syncedRef.current = {};
+          return;
+        }
+        if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? "" });
+      });
+      unsub = () => sub.subscription.unsubscribe();
+    })();
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, []);
+
 
   const persist = useCallback((next: Recording[]) => {
     setRecordings(next);
@@ -772,7 +804,10 @@ function Index() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => void supabase.auth.signOut()}
+                  onClick={() =>
+                    void getSupabase().then((sb) => sb.auth.signOut())
+                  }
+
                 >
                   <LogOut className="mr-1 h-3.5 w-3.5" />
                   Odhlásit
