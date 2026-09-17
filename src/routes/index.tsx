@@ -405,8 +405,34 @@ function Index() {
                 ))}
               </select>
             </label>
+
+            <div className="w-full border-t border-border/60 pt-4 text-center">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*,video/webm,video/mp4"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void importFile(file);
+                }}
+              />
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isRecording}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Nahrát zvukový soubor
+              </Button>
+              <p className="mt-2 text-xs text-muted-foreground">
+                MP3, WAV, M4A a další, do 14 MB.
+              </p>
+            </div>
           </div>
         </Card>
+
 
         <section className="mt-10 space-y-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
