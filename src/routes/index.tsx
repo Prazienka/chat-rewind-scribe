@@ -465,6 +465,28 @@ function Index() {
     saveBlob(stored.blob, stored.filename || `${baseName(rec)}.wav`);
   };
 
+  const togglePlayer = async (rec: Recording) => {
+    const existing = audioUrls[rec.id];
+    if (existing) {
+      URL.revokeObjectURL(existing);
+      setAudioUrls((prev) => {
+        const next = { ...prev };
+        delete next[rec.id];
+        return next;
+      });
+      return;
+    }
+    const stored = await loadAudio(rec.id);
+    if (!stored) {
+      toast.error("Zvukový záznam už není uložený v zařízení.");
+      return;
+    }
+    const url = URL.createObjectURL(stored.blob);
+    setAudioUrls((prev) => ({ ...prev, [rec.id]: url }));
+  };
+
+
+
   const exportText = (rec: Recording, kind: "transcript" | "summary") => {
     const text = kind === "transcript" ? rec.transcript : (rec.summary ?? "");
     if (!text.trim()) {
