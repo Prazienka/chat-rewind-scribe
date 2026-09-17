@@ -150,11 +150,26 @@ function Index() {
       const supabase = await getSupabase();
       if (cancelled) return;
       // Session je uložená v prohlížeči, takže uživatel zůstane přihlášený.
+      // Pokud si přihlášení zapamatovat nechtěl, po zavření aplikace ho odhlásíme.
+      let forget = false;
+      try {
+        forget =
+          localStorage.getItem("zapisnik.remember") === "0" &&
+          !sessionStorage.getItem("zapisnik.session-alive");
+        sessionStorage.setItem("zapisnik.session-alive", "1");
+      } catch {
+        /* ignore */
+      }
+      if (forget) {
+        await supabase.auth.signOut();
+        return;
+      }
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionUser = sessionData.session?.user;
       if (sessionUser && !cancelled) {
         setUser({ id: sessionUser.id, email: sessionUser.email ?? "" });
       }
+
       const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === "SIGNED_OUT") {
           setUser(null);
