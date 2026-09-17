@@ -674,6 +674,7 @@ function Index() {
       return;
     }
     persistGroups([...groups, name]);
+    if (user) void addCloudGroup(user.id, name).catch(() => {});
     setNewGroup("");
     setFilter(name);
     toast.success(`Skupina „${name}“ vytvořena.`);
@@ -681,9 +682,11 @@ function Index() {
 
   const removeGroup = (name: string) => {
     persistGroups(groups.filter((g) => g !== name));
+    if (user) void deleteCloudGroup(name).catch(() => {});
     persist(recordings.map((r) => (r.group === name ? { ...r, group: "" } : r)));
     setFilter("all");
   };
+
 
   const startRename = (rec: Recording) => {
     setEditingId(rec.id);
