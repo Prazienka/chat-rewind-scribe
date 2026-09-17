@@ -31,9 +31,33 @@ export const Route = createFileRoute("/api/transcribe")({
           );
         }
 
+        const type = (file.type || "audio/wav").split(";")[0] ?? "audio/wav";
+        const extByType: Record<string, string> = {
+          "audio/wav": "wav",
+          "audio/x-wav": "wav",
+          "audio/wave": "wav",
+          "audio/webm": "webm",
+          "video/webm": "webm",
+          "audio/mp4": "mp4",
+          "audio/m4a": "m4a",
+          "audio/x-m4a": "m4a",
+          "video/mp4": "mp4",
+          "audio/mpeg": "mp3",
+          "audio/mp3": "mp3",
+          "audio/flac": "flac",
+          "audio/ogg": "ogg",
+        };
+        const nameExt = file.name.includes(".")
+          ? file.name.split(".").pop()!.toLowerCase()
+          : undefined;
+        const ext = extByType[type] ?? nameExt ?? "wav";
+        // Gemini rejects video/* parts, even when the container is audio-only.
+        const audioType = type.startsWith("video/") ? type.replace("video/", "audio/") : type;
+        const payload = new Blob([await file.arrayBuffer()], { type: audioType });
+
         const upstream = new FormData();
         upstream.append("model", "google/gemini-3.5-transcribe");
-        upstream.append("file", file, "recording.wav");
+        upstream.append("file", payload, `recording.${ext}`);
         upstream.append("stream", "true");
         if (typeof language === "string" && language && language !== "auto") {
           upstream.append("language", language);

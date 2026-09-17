@@ -1,6 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, Square, Loader2, Copy, Download, Trash2, FileAudio } from "lucide-react";
+import {
+  Mic,
+  Square,
+  Loader2,
+  Copy,
+  Download,
+  Trash2,
+  FileAudio,
+  Upload,
+  Sparkles,
+  RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -34,6 +45,10 @@ type Recording = {
   transcript: string;
   status: "running" | "done" | "error";
   error?: string;
+  title?: string;
+  summary?: string;
+  summaryStatus?: "running" | "done" | "error";
+  summaryError?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
@@ -56,6 +71,7 @@ function Index() {
   const ctxRef = useRef<AudioContext | null>(null);
   const nodeRef = useRef<ScriptProcessorNode | null>(null);
   const pcmRef = useRef<Float32Array[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     try {
@@ -94,11 +110,70 @@ function Index() {
     return () => clearInterval(timer);
   }, [isRecording]);
 
+  const summarize = useCallback(
+    async (text: string, id: string) => {
+      update(id, { summaryStatus: "running", summary: "", summaryError: "" });
+      try {
+        const res = await fetch("/api/summarize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok || !res.body) {
+          let message = "Shrnutí se nepodařilo.";
+          try {
+            const data = (await res.json()) as { error?: string };
+            if (data?.error) message = data.error;
+          } catch {
+            /* ignore */
+          }
+          update(id, { summaryStatus: "error", summaryError: message });
+          return;
+        }
+
+        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = "";
+        let summary = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const event = JSON.parse(payload) as { type?: string; delta?: string };
+              if (event.type === "response.output_text.delta" && event.delta) {
+                summary += event.delta;
+                update(id, { summary });
+              }
+            } catch {
+              /* ignore malformed event */
+            }
+          }
+        }
+        if (summary.trim().length === 0) {
+          update(id, { summaryStatus: "error", summaryError: "Shrnutí se nepodařilo vytvořit." });
+        } else {
+          update(id, { summary, summaryStatus: "done" });
+        }
+      } catch (err) {
+        console.error(err);
+        update(id, { summaryStatus: "error", summaryError: "Spojení se přerušilo." });
+      }
+    },
+    [update],
+  );
+
   const transcribe = useCallback(
-    async (blob: Blob, id: string) => {
+    async (blob: Blob, id: string, filename = "recording.wav") => {
       const body = new FormData();
-      body.append("file", blob, "recording.wav");
+      body.append("file", blob, filename);
       body.append("language", language);
+
 
       try {
         const res = await fetch("/api/transcribe", { method: "POST", body });
@@ -150,6 +225,7 @@ function Index() {
           update(id, { status: "error", error: "V nahrávce nebyla rozpoznána žádná řeč." });
         } else {
           update(id, { transcript: text, status: "done" });
+          void summarize(text, id);
         }
       } catch (err) {
         console.error(err);
@@ -157,7 +233,7 @@ function Index() {
         toast.error("Spojení se přerušilo.");
       }
     },
-    [language, update],
+    [language, summarize, update],
   );
 
   const start = useCallback(async () => {
@@ -216,6 +292,48 @@ function Index() {
     persist([entry, ...recordings]);
     void transcribe(blob, id);
   }, [elapsed, persist, recordings, transcribe]);
+
+  const importFile = useCallback(
+    async (file: File) => {
+      if (file.size > 14 * 1024 * 1024) {
+        toast.error("Soubor je příliš velký (max 14 MB).");
+        return;
+      }
+      let duration = 0;
+      try {
+        duration = await new Promise<number>((resolve) => {
+          const audio = document.createElement("audio");
+          audio.preload = "metadata";
+          audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
+          audio.onerror = () => resolve(0);
+          audio.src = URL.createObjectURL(file);
+        });
+      } catch {
+        /* ignore */
+      }
+
+      const id = crypto.randomUUID();
+      const entry: Recording = {
+        id,
+        createdAt: Date.now(),
+        duration,
+        transcript: "",
+        status: "running",
+        title: file.name,
+      };
+      setRecordings((prev) => {
+        const next = [entry, ...prev];
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+      void transcribe(file, id, file.name);
+    },
+    [transcribe],
+  );
 
   const remove = (id: string) => persist(recordings.filter((r) => r.id !== id));
 
@@ -288,8 +406,34 @@ function Index() {
                 ))}
               </select>
             </label>
+
+            <div className="w-full border-t border-border/60 pt-4 text-center">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*,video/webm,video/mp4"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void importFile(file);
+                }}
+              />
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isRecording}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Nahrát zvukový soubor
+              </Button>
+              <p className="mt-2 text-xs text-muted-foreground">
+                MP3, WAV, M4A a další, do 14 MB.
+              </p>
+            </div>
           </div>
         </Card>
+
 
         <section className="mt-10 space-y-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -306,11 +450,12 @@ function Index() {
           {recordings.map((rec) => (
             <Card key={rec.id} className="space-y-3 p-5">
               <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">
-                    {new Date(rec.createdAt).toLocaleString("cs-CZ")}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {rec.title ?? new Date(rec.createdAt).toLocaleString("cs-CZ")}
                   </p>
                   <p className="text-xs text-muted-foreground">
+                    {rec.title ? `${new Date(rec.createdAt).toLocaleString("cs-CZ")} · ` : ""}
                     Délka {formatDuration(rec.duration)}
                   </p>
                 </div>
@@ -334,15 +479,72 @@ function Index() {
               {rec.status === "error" ? (
                 <p className="text-sm text-destructive">{rec.error}</p>
               ) : (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                  {rec.transcript}
-                  {rec.status === "running" && (
-                    <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      přepisuji…
-                    </span>
-                  )}
-                </p>
+                <>
+                  <div className="rounded-lg border border-border/70 bg-muted/40 p-4">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        AI shrnutí
+                      </p>
+                      <div className="flex items-center gap-1">
+                        {rec.summaryStatus === "done" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Kopírovat shrnutí"
+                            onClick={() => copy(rec.summary ?? "")}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {rec.status === "done" && rec.summaryStatus !== "running" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Vytvořit shrnutí znovu"
+                            onClick={() => void summarize(rec.transcript, rec.id)}
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {rec.summaryStatus === "error" ? (
+                      <p className="text-sm text-destructive">{rec.summaryError}</p>
+                    ) : rec.summary ? (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                        {rec.summary}
+                      </p>
+                    ) : (
+                      <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                        {rec.summaryStatus === "running" || rec.status === "running" ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            připravuji shrnutí…
+                          </>
+                        ) : (
+                          "Shrnutí ještě není k dispozici."
+                        )}
+                      </p>
+                    )}
+                  </div>
+
+                  <details className="rounded-lg border border-border/70 p-4">
+                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Celý přepis
+                    </summary>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                      {rec.transcript}
+                      {rec.status === "running" && (
+                        <span className="ml-1 inline-flex items-center gap-2 text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          přepisuji…
+                        </span>
+                      )}
+                    </p>
+                  </details>
+                </>
               )}
             </Card>
           ))}
