@@ -1,6 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, Square, Loader2, Copy, Download, Trash2, FileAudio } from "lucide-react";
+import {
+  Mic,
+  Square,
+  Loader2,
+  Copy,
+  Download,
+  Trash2,
+  FileAudio,
+  Upload,
+  Sparkles,
+  RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -34,6 +45,10 @@ type Recording = {
   transcript: string;
   status: "running" | "done" | "error";
   error?: string;
+  title?: string;
+  summary?: string;
+  summaryStatus?: "running" | "done" | "error";
+  summaryError?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
