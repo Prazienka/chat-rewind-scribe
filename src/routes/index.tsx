@@ -721,20 +721,57 @@ function Index() {
                 </div>
                 <div className="flex items-center gap-1">
                   {rec.status === "done" && (
-                    <>
-                      <Button variant="ghost" size="icon" onClick={() => copy(rec.transcript)}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => download(rec)}>
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Kopírovat přepis"
+                      onClick={() => copy(rec.transcript)}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
                   )}
-                  <Button variant="ghost" size="icon" onClick={() => remove(rec.id)}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Smazat nahrávku"
+                    onClick={() => remove(rec.id)}
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
+
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/30 p-3">
+                <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Download className="h-3.5 w-3.5" />
+                  Export
+                </span>
+                {rec.hasAudio && (
+                  <Button variant="outline" size="sm" onClick={() => void exportAudio(rec)}>
+                    <Music className="mr-1.5 h-3.5 w-3.5" />
+                    Zvuk
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rec.status !== "done"}
+                  onClick={() => exportText(rec, "transcript")}
+                >
+                  <FileText className="mr-1.5 h-3.5 w-3.5" />
+                  Celý přepis
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rec.summaryStatus !== "done"}
+                  onClick={() => exportText(rec, "summary")}
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  AI shrnutí
+                </Button>
+              </div>
+
 
               {rec.status === "error" ? (
                 <p className="text-sm text-destructive">{rec.error}</p>
