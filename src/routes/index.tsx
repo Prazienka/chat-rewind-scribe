@@ -108,13 +108,15 @@ function Index() {
   const [editingTitle, setEditingTitle] = useState("");
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
   const [openTranscript, setOpenTranscript] = useState<Record<string, boolean>>({});
-
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const nodeRef = useRef<ScriptProcessorNode | null>(null);
   const pcmRef = useRef<Float32Array[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const syncedRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     try {
@@ -125,6 +127,21 @@ function Index() {
     } catch {
       /* ignore */
     }
+  }, []);
+
+  useEffect(() => {
+    void supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setUser({ id: data.user.id, email: data.user.email ?? "" });
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+        syncedRef.current = {};
+        return;
+      }
+      if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? "" });
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
   const persist = useCallback((next: Recording[]) => {
@@ -147,6 +164,108 @@ function Index() {
       return next;
     });
   }, []);
+
+  // Po přihlášení stáhnout cloudová data a nahrát to, co je jen v zařízení.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setSyncing(true);
+    void (async () => {
+      try {
+        const [cloud, cloudGroups] = await Promise.all([
+          fetchCloudRecordings(),
+          fetchCloudGroups(),
+        ]);
+        if (cancelled) return;
+        for (const rec of cloud) syncedRef.current[rec.id] = JSON.stringify(rec);
+        setRecordings((prev) => {
+          const map = new Map<string, Recording>();
+          for (const rec of cloud) map.set(rec.id, rec as Recording);
+          for (const rec of prev) if (!map.has(rec.id)) map.set(rec.id, rec);
+          const merged = [...map.values()].sort((a, b) => b.createdAt - a.createdAt);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          } catch {
+            /* ignore */
+          }
+          return merged;
+        });
+        setGroups((prev) => {
+          const merged = [...new Set([...cloudGroups, ...prev])];
+          try {
+            localStorage.setItem(GROUPS_KEY, JSON.stringify(merged));
+          } catch {
+            /* ignore */
+          }
+          for (const name of merged) {
+            if (!cloudGroups.includes(name)) void addCloudGroup(user.id, name).catch(() => {});
+          }
+          return merged;
+        });
+      } catch {
+        toast.error("Nepodařilo se načíst nahrávky z cloudu.");
+      } finally {
+        if (!cancelled) setSyncing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // Průběžně posílat změny do cloudu.
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      for (const rec of recordings) {
+        if (rec.status === "running" || rec.summaryStatus === "running") continue;
+        const snapshot = JSON.stringify({
+          id: rec.id,
+          createdAt: rec.createdAt,
+          duration: rec.duration,
+          transcript: rec.transcript,
+          status: rec.status,
+          title: rec.title ?? "",
+          rawTranscript: rec.rawTranscript ?? "",
+          summary: rec.summary ?? "",
+          group: rec.group ?? "",
+          audioName: rec.audioName ?? "",
+          audioPath: rec.audioPath ?? "",
+        });
+        if (syncedRef.current[rec.id] === snapshot) continue;
+        syncedRef.current[rec.id] = snapshot;
+        void upsertCloudRecording(user.id, rec).catch(() => {
+          delete syncedRef.current[rec.id];
+        });
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [recordings, user]);
+
+  const storeAudio = useCallback(
+    async (id: string, blob: Blob, filename: string) => {
+      await saveAudio(id, blob, filename);
+      if (!user) return;
+      try {
+        const path = await uploadCloudAudio(user.id, id, blob, filename);
+        update(id, { audioPath: path });
+      } catch {
+        /* zvuk zůstane aspoň v zařízení */
+      }
+    },
+    [update, user],
+  );
+
+  const getAudio = useCallback(async (rec: Recording) => {
+    const local = await loadAudio(rec.id);
+    if (local) return local;
+    if (rec.audioPath) {
+      const blob = await downloadCloudAudio(rec.audioPath);
+      if (blob) return { blob, filename: rec.audioName || "nahravka.wav" };
+    }
+    return null;
+  }, []);
+
 
   useEffect(() => {
     if (!isRecording) return;
