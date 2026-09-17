@@ -9,17 +9,11 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as ApiRefineRouteImport } from './routes/api/refine'
 import { Route as ApiSummarizeRouteImport } from './routes/api/summarize'
 import { Route as ApiTranscribeRouteImport } from './routes/api/transcribe'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -42,14 +36,12 @@ const ApiTranscribeRoute = ApiTranscribeRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/api/refine': typeof ApiRefineRoute
   '/api/summarize': typeof ApiSummarizeRoute
   '/api/transcribe': typeof ApiTranscribeRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/api/refine': typeof ApiRefineRoute
   '/api/summarize': typeof ApiSummarizeRoute
@@ -57,7 +49,6 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/api/refine': typeof ApiRefineRoute
   '/api/summarize': typeof ApiSummarizeRoute
@@ -65,21 +56,14 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    '/' | '/auth' | '/api/refine' | '/api/summarize' | '/api/transcribe'
+  fullPaths: '/auth' | '/api/refine' | '/api/summarize' | '/api/transcribe'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/api/refine' | '/api/summarize' | '/api/transcribe'
+  to: '/auth' | '/api/refine' | '/api/summarize' | '/api/transcribe'
   id:
-    | '__root__'
-    | '/'
-    | '/auth'
-    | '/api/refine'
-    | '/api/summarize'
-    | '/api/transcribe'
+    '__root__' | '/auth' | '/api/refine' | '/api/summarize' | '/api/transcribe'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
   ApiRefineRoute: typeof ApiRefineRoute
   ApiSummarizeRoute: typeof ApiSummarizeRoute
@@ -88,13 +72,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -127,7 +104,6 @@ declare module '@tanstack/react-router' {
 }
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
   ApiRefineRoute: ApiRefineRoute,
   ApiSummarizeRoute: ApiSummarizeRoute,

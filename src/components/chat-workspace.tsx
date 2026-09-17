@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Mic,
@@ -62,27 +62,6 @@ import {
 import { encodeWav, formatDuration } from "@/lib/wav";
 import { saveAudio, loadAudio, deleteAudio } from "@/lib/audio-store";
 
-export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Chat Scribe – nahrávání rozhovorů a AI přepisy" },
-      {
-        name: "description",
-        content:
-          "Nahrajte rozhovor přímo v prohlížeči a nechte si ho automaticky přepsat do textu pomocí AI.",
-      },
-      { property: "og:title", content: "Chat Scribe – nahrávání rozhovorů a AI přepisy" },
-      {
-        property: "og:description",
-        content: "Nahrajte rozhovor a získejte přesný textový přepis za pár sekund.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
-  component: Index,
-});
-
 type Recording = {
   id: string;
   createdAt: number;
@@ -112,7 +91,11 @@ const LANGS = [
   { value: "de", label: "Němčina" },
 ];
 
-function Index() {
+type ChatWorkspaceProps = {
+  mode: "recorder" | "library";
+};
+
+export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -856,6 +839,17 @@ function Index() {
     [recordings],
   );
 
+  const processingRecordings = useMemo(
+    () =>
+      recordings.filter(
+        (recording) =>
+          recording.status === "running" ||
+          recording.refineStatus === "running" ||
+          recording.summaryStatus === "running",
+      ),
+    [recordings],
+  );
+
   const groupCounts = useMemo(
     () =>
       recordings.reduce<Record<string, number>>((counts, recording) => {
@@ -876,18 +870,18 @@ function Index() {
     <div className="min-h-dvh bg-background pb-24 sm:pb-10">
       <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto grid min-h-16 w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
-          <a href="#record" className="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <Link to="/" className="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <span className="grid size-10 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground"><AudioLines className="size-5" aria-hidden="true" /></span>
             <span className="min-w-0">
               <span className="block truncate font-display text-base font-semibold text-foreground">Chat Scribe</span>
               <span className="block truncate text-xs text-muted-foreground">Rozhovory → přepisy → shrnutí</span>
             </span>
-          </a>
+          </Link>
           <div className="flex shrink-0 items-center gap-1">
             <nav className="hidden items-center gap-1 md:flex" aria-label="Hlavní navigace">
-              <Button variant="ghost" asChild><a href="#record"><Mic aria-hidden="true" /> Nahrávat</a></Button>
-              <Button variant="ghost" asChild><a href="#transcripts"><Library aria-hidden="true" /> Přepisy</a></Button>
-              <Button variant="ghost" asChild><a href="#settings"><Settings2 aria-hidden="true" /> Nastavení</a></Button>
+              <Button variant={mode === "recorder" ? "secondary" : "ghost"} asChild><Link to="/"><Mic aria-hidden="true" /> Nahrávat</Link></Button>
+              <Button variant={mode === "library" ? "secondary" : "ghost"} asChild><Link to="/transcripts"><Library aria-hidden="true" /> Přepisy</Link></Button>
+              <Button variant="ghost" asChild><Link to="/" hash="settings"><Settings2 aria-hidden="true" /> Nastavení</Link></Button>
             </nav>
             {user ? (
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -916,6 +910,7 @@ function Index() {
       </header>
 
       <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        {mode === "recorder" ? (
         <section id="record" className="scroll-mt-24 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <div className="grid lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)]">
             <div className="flex flex-col items-center justify-center p-6 text-center sm:p-10">
@@ -998,7 +993,35 @@ function Index() {
           </div>
         </section>
 
-        <section id="transcripts" className="mt-8 scroll-mt-24">
+        ) : null}
+
+        {mode === "recorder" ? (
+          <section className="mx-auto mt-6 max-w-3xl" aria-label="Aktuální zpracování">
+            {processingRecordings.length > 0 ? (
+              <div className="rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="size-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
+                    <div>
+                      <h2 className="font-display text-sm font-semibold text-foreground">Zpracování nahrávky</h2>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {processingRecordings[0]?.status === "running" ? "Přepisuji zvuk…" : processingRecordings[0]?.refineStatus === "running" ? "Upravuji češtinu…" : "Tvořím AI shrnutí…"}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant="secondary">{processingCount}</Badge>
+                </div>
+                <Progress value={processingRecordings[0]?.status === "running" ? 35 : processingRecordings[0]?.refineStatus === "running" ? 65 : 85} className="mt-4 h-1.5" aria-label="Průběh zpracování" />
+              </div>
+            ) : null}
+            <div className="mt-5 flex justify-center">
+              <Button variant="ghost" className="min-h-11 text-muted-foreground" asChild>
+                <Link to="/transcripts"><Library aria-hidden="true" /> Zobrazit přepisy <ChevronRight aria-hidden="true" /></Link>
+              </Button>
+            </div>
+          </section>
+        ) : (
+        <section id="transcripts" className="scroll-mt-24">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
             <div className="min-w-0"><p className="text-sm font-medium text-primary">Knihovna</p><h2 className="truncate font-display text-2xl font-semibold text-foreground">Nahrávky a přepisy</h2></div>
             <Badge variant="secondary">{recordings.length} {recordings.length === 1 ? "záznam" : "záznamů"}</Badge>
@@ -1143,12 +1166,13 @@ function Index() {
             </div>
           </div>
         </section>
+        )}
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-border bg-background/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur md:hidden" aria-label="Mobilní navigace">
-        <Button variant="ghost" className="h-12 flex-col gap-1 text-xs" asChild><a href="#record"><Mic aria-hidden="true" />Nahrávat</a></Button>
-        <Button variant="ghost" className="h-12 flex-col gap-1 text-xs" asChild><a href="#transcripts"><Library aria-hidden="true" />Přepisy{processingCount > 0 ? <span className="sr-only">, {processingCount} se zpracovává</span> : null}</a></Button>
-        <Button variant="ghost" className="h-12 flex-col gap-1 text-xs" asChild><a href="#settings"><Settings2 aria-hidden="true" />Nastavení</a></Button>
+        <Button variant={mode === "recorder" ? "secondary" : "ghost"} className="h-12 flex-col gap-1 text-xs" asChild><Link to="/"><Mic aria-hidden="true" />Nahrávat</Link></Button>
+        <Button variant={mode === "library" ? "secondary" : "ghost"} className="h-12 flex-col gap-1 text-xs" asChild><Link to="/transcripts"><Library aria-hidden="true" />Přepisy{processingCount > 0 ? <span className="sr-only">, {processingCount} se zpracovává</span> : null}</Link></Button>
+        <Button variant="ghost" className="h-12 flex-col gap-1 text-xs" asChild><Link to="/" hash="settings"><Settings2 aria-hidden="true" />Nastavení</Link></Button>
       </nav>
 
       {showBack && (
