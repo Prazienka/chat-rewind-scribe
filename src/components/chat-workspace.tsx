@@ -212,6 +212,18 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const elapsedBaseRef = useRef(0);
   const pendingRef = useRef<{ session: string; segments: Blob[]; seconds: number } | null>(null);
   const audioUrlsRef = useRef<Record<string, string>>({});
+  const lastDataAtRef = useRef(0);
+
+  // Stav nahrávací session drží samostatný automat (src/lib/recording-session.ts),
+  // aby lifecycle events nezávisely na vykreslování.
+  const sessionRef = useRef<RecordingSessionState>(initialSessionState);
+  const [sessionState, setSessionState] = useState<RecordingSessionState>(initialSessionState);
+  const dispatchSession = useCallback((event: RecordingEvent) => {
+    const next = reduceSession(sessionRef.current, event);
+    if (next === sessionRef.current) return;
+    sessionRef.current = next;
+    setSessionState(next);
+  }, []);
 
   // Mikrofon uvolníme teprve při odchodu ze stránky, ne po dokončení nahrávky.
   useEffect(
