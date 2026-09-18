@@ -1411,9 +1411,23 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
               </p>
               <div className="mt-2 flex items-center gap-2 text-sm" aria-live="polite">
                 <Circle className={`size-2.5 ${isRecording ? "fill-destructive text-destructive" : "fill-muted-foreground text-muted-foreground"}`} aria-hidden="true" />
-                <span className={isRecording ? "font-medium text-destructive" : "text-muted-foreground"}>{isRecording ? "Nahrávání probíhá — klepnutím zastavíte" : "Připraveno k nahrávání"}</span>
+                <span className={isRecording ? "font-medium text-destructive" : "text-muted-foreground"}>
+                  {isRecording
+                    ? `${sessionLabel(sessionState)}${sessionState.phase === "recording" ? " — klepnutím zastavíte" : ""}`
+                    : "Připraveno k nahrávání"}
+                </span>
               </div>
               {isRecording ? <Progress value={Math.min(100, level * 180)} className="mt-5 max-w-sm" aria-label="Hlasitost mikrofonu" /> : null}
+              {isRecording && segmentCount > 0 ? (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Bezpečně uloženo částí: {segmentCount}
+                </p>
+              ) : null}
+              {backgroundNote ? (
+                <p className="mt-3 max-w-sm text-xs leading-5 text-muted-foreground" aria-live="polite">
+                  {backgroundNote}
+                </p>
+              ) : null}
             </div>
 
             <aside id="settings" className="scroll-mt-24 border-t border-border bg-muted/30 p-5 lg:border-l lg:border-t-0 sm:p-6">
