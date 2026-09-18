@@ -690,13 +690,19 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           setLevel(peak);
         };
         source.connect(node);
-        node.connect(ctx.destination);
+        // Tichý výstup: procesor musí být připojený k výstupu, ale mikrofon se nikdy nepřehraje.
+        const silent = ctx.createGain();
+        silent.gain.value = 0;
+        node.connect(silent);
+        silent.connect(ctx.destination);
         elapsedRef.current = elapsedBaseRef.current;
         setElapsed(elapsedBaseRef.current);
         setIsRecording(true);
       } catch (err) {
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
+        if (!streamRef.current?.getAudioTracks().some((t) => t.readyState === "live")) {
+          streamRef.current?.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
         const name = (err as { name?: string })?.name ?? "";
         const inFrame = typeof window !== "undefined" && window.self !== window.top;
         if (name === "NotAllowedError" || name === "SecurityError") {
