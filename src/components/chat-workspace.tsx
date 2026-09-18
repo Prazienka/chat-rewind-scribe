@@ -837,7 +837,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     pendingRef.current = { session, segments, seconds };
     elapsedBaseRef.current = seconds;
     setPending({ duration: seconds, segments: segments.length });
-  }, [flushBuffer]);
+  }, [flushBuffer, teardownGraph]);
 
   // Nahrávka se automaticky zastaví na dvou hodinách, aby se stihla bezpečně uložit.
   useEffect(() => {
