@@ -187,6 +187,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const flushingRef = useRef(false);
   const flushPromiseRef = useRef<Promise<void> | null>(null);
   const autoStopRequestedRef = useRef(false);
+  const startingRef = useRef(false);
+  const recoveringRef = useRef(false);
+  const stoppingRef = useRef(false);
+  /** Běží uživatelská nahrávací session? Ukončí ji jen tlačítko nebo limit. */
+  const activeRef = useRef(false);
   const sampleRateRef = useRef(48000);
   const sessionIdRef = useRef<string | null>(null);
   const segmentsRef = useRef<Blob[]>([]);
@@ -648,25 +653,56 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     return task;
   }, [flushBuffer]);
 
+  /** Živý mikrofonní stream, pokud ho prohlížeč stále drží. */
+  const liveStream = useCallback(() => {
+    const existing = streamRef.current;
+    if (existing?.getAudioTracks().some((t) => t.readyState === "live")) return existing;
+    return null;
+  }, []);
+
+  /** Rozebere jen zvukový graf. Mikrofon ani nasbírané části se nikdy neruší. */
+  const teardownGraph = useCallback(async () => {
+    const node = nodeRef.current;
+    if (node) {
+      node.onaudioprocess = null;
+      node.disconnect();
+    }
+    nodeRef.current = null;
+    const ctx = ctxRef.current;
+    ctxRef.current = null;
+    if (ctx && ctx.state !== "closed") {
+      try {
+        await ctx.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
   const start = useCallback(
     async (resume = false) => {
       if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
         toast.error("Tento prohlížeč nahrávání nepodporuje. Zkuste Chrome nebo Safari.");
         return;
       }
+      if (startingRef.current) return;
+      startingRef.current = true;
       try {
         // Jednou povolený mikrofon si držíme, aby prohlížeč oprávnění znovu nevyžadoval.
-        const existing = streamRef.current;
-        const live = existing?.getAudioTracks().some((t) => t.readyState === "live");
-        const stream = live
-          ? existing!
-          : await navigator.mediaDevices.getUserMedia({
-              audio: { echoCancellation: true, noiseSuppression: true },
-            });
+        let stream = liveStream();
+        if (!stream) {
+          // Mrtvé tracky uklidíme, ať nedrží zařízení; oprávnění tím nezaniká.
+          streamRef.current?.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true },
+          });
+        }
         streamRef.current = stream;
         stream.getAudioTracks().forEach((t) => {
           t.enabled = true;
         });
+        await teardownGraph();
         const ctx = new AudioContext();
         ctxRef.current = ctx;
         if (ctx.state === "suspended") await ctx.resume();
@@ -710,9 +746,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         silent.connect(ctx.destination);
         elapsedRef.current = elapsedBaseRef.current;
         setElapsed(elapsedBaseRef.current);
+        activeRef.current = true;
         setIsRecording(true);
       } catch (err) {
-        if (!streamRef.current?.getAudioTracks().some((t) => t.readyState === "live")) {
+        if (!liveStream()) {
           streamRef.current?.getTracks().forEach((t) => t.stop());
           streamRef.current = null;
         }
@@ -732,26 +769,60 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         } else {
           toast.error("Nepodařilo se získat přístup k mikrofonu.");
         }
+        throw err;
+      } finally {
+        startingRef.current = false;
       }
     },
-    [queueFlush],
+    [liveStream, queueFlush, teardownGraph],
   );
 
+  /**
+   * Obnoví snímání po tom, co ho systém na pozadí pozastavil. Session, uložené části
+   * ani čas se nikdy nezahazují – jen se znovu rozběhne zvukový graf.
+   */
+  const resumeCapture = useCallback(async () => {
+    if (recoveringRef.current || stoppingRef.current || !activeRef.current) return;
+    recoveringRef.current = true;
+    setBackgroundNote("Obnovuji nahrávání po návratu z pozadí…");
+    try {
+      await queueFlush();
+      await teardownGraph();
+      // Čas navážeme na skutečně zaznamenaný zvuk, ne na hodiny na pozadí.
+      elapsedBaseRef.current = Math.max(
+        wavChunksDuration(segmentsRef.current),
+        elapsedBaseRef.current,
+      );
+      await start(true);
+      setBackgroundNote(
+        "Nahrávání pokračuje. Části uložené před přerušením zůstaly zachované.",
+      );
+    } catch {
+      setBackgroundNote(
+        "Systém nahrávání pozastavil a zatím ho nelze obnovit. Uložené části jsou v bezpečí – klepněte na Začít nahrávat pro pokračování, nebo nahrávku uložte.",
+      );
+      activeRef.current = false;
+      setIsRecording(false);
+    } finally {
+      recoveringRef.current = false;
+    }
+  }, [queueFlush, start, teardownGraph]);
+
+  // Zastavit smí pouze uživatel (tlačítko) nebo dosažení limitu 2 hodin.
   const stop = useCallback(async () => {
+    stoppingRef.current = true;
+    activeRef.current = false;
     setIsRecording(false);
     setLevel(0);
-    const ctx = ctxRef.current;
     // Mikrofonní stream necháváme naživu, aby oprávnění zůstalo a další nahrávání
     // nemuselo znovu žádat o přístup. Snímání jen vypneme a uvolníme až při odchodu.
     streamRef.current?.getAudioTracks().forEach((t) => {
       t.enabled = false;
     });
-    nodeRef.current?.disconnect();
-    nodeRef.current = null;
     await flushPromiseRef.current;
     await flushBuffer();
-    await ctx?.close();
-    ctxRef.current = null;
+    await teardownGraph();
+    stoppingRef.current = false;
 
     const segments = segmentsRef.current;
     const seconds = Math.max(elapsedRef.current, wavChunksDuration(segments));
@@ -767,7 +838,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     pendingRef.current = { session, segments, seconds };
     elapsedBaseRef.current = seconds;
     setPending({ duration: seconds, segments: segments.length });
-  }, [flushBuffer]);
+  }, [flushBuffer, teardownGraph]);
 
   // Nahrávka se automaticky zastaví na dvou hodinách, aby se stihla bezpečně uložit.
   useEffect(() => {
@@ -776,8 +847,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     void stop();
   }, [elapsed, isRecording, stop]);
 
-  // Na mobilu se snažíme udržet nahrávání i při přepnutí aplikace do pozadí.
-  // Prohlížeč to negarantuje, proto při návratu vždy obnovíme zvukový kontext.
+  // Nahrávání držíme i na pozadí a při zamknutém displeji. Žádná automatická událost
+  // nahrávku neukončuje – jen bezpečně ukládá části a po návratu snímání obnoví.
   useEffect(() => {
     if (!isRecording) return;
     let lock: WakeLockSentinel | null = null;
@@ -795,6 +866,26 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     };
     void requestLock();
 
+    /** Snímá zvuk skutečně dál? */
+    const capturing = () =>
+      ctxRef.current?.state === "running" &&
+      Boolean(streamRef.current?.getAudioTracks().some((t) => t.readyState === "live" && t.enabled));
+
+    const healthCheck = async () => {
+      if (document.visibilityState !== "visible" || recoveringRef.current) return;
+      void requestLock();
+      const ctx = ctxRef.current;
+      if (ctx && ctx.state === "suspended") {
+        try {
+          await ctx.resume();
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!capturing()) await resumeCapture();
+      else setBackgroundNote(null);
+    };
+
     const onVisibility = () => {
       if (document.visibilityState !== "visible") {
         setBackgroundNote(
@@ -803,13 +894,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         void queueFlush();
         return;
       }
-      void ctxRef.current?.resume();
-      void requestLock();
-      if (ctxRef.current?.state !== "running") {
-        setBackgroundNote(
-          "Prohlížeč nahrávání na pozadí pozastavil. Už uložené části zůstaly zachovány – pokračujte nahráváním, nebo nahrávku uložte.",
-        );
-      }
+      void healthCheck();
     };
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       void queueFlush();
@@ -819,11 +904,31 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     const onPageHide = () => {
       void queueFlush();
     };
+    const onTrackLost = () => {
+      void queueFlush();
+      if (document.visibilityState === "visible") void healthCheck();
+    };
+    const tracks = streamRef.current?.getAudioTracks() ?? [];
+    tracks.forEach((t) => {
+      t.addEventListener("ended", onTrackLost);
+      t.addEventListener("mute", onTrackLost);
+    });
+    // Záložní hlídač pro platformy, které visibilitychange ani ended nepošlou.
+    const watchdog = setInterval(() => void healthCheck(), 5000);
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onVisibility);
+    window.addEventListener("focus", onVisibility);
     window.addEventListener("beforeunload", onBeforeUnload);
     window.addEventListener("pagehide", onPageHide);
     return () => {
+      clearInterval(watchdog);
+      tracks.forEach((t) => {
+        t.removeEventListener("ended", onTrackLost);
+        t.removeEventListener("mute", onTrackLost);
+      });
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onVisibility);
+      window.removeEventListener("focus", onVisibility);
       window.removeEventListener("beforeunload", onBeforeUnload);
       window.removeEventListener("pagehide", onPageHide);
       if (!released) {
@@ -831,7 +936,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         void lock?.release().catch(() => {});
       }
     };
-  }, [isRecording, queueFlush]);
+  }, [isRecording, queueFlush, resumeCapture]);
 
   // Po pádu, restartu nebo zavření aplikace najdeme rozpracovanou nahrávku.
   useEffect(() => {
