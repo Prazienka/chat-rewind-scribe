@@ -27,6 +27,8 @@ export type Database = {
           summary: string | null
           title: string | null
           transcript: string
+          translation: string | null
+          translation_lang: string | null
           updated_at: string
           user_id: string
         }
@@ -42,6 +44,8 @@ export type Database = {
           summary?: string | null
           title?: string | null
           transcript?: string
+          translation?: string | null
+          translation_lang?: string | null
           updated_at?: string
           user_id: string
         }
@@ -57,6 +61,8 @@ export type Database = {
           summary?: string | null
           title?: string | null
           transcript?: string
+          translation?: string | null
+          translation_lang?: string | null
           updated_at?: string
           user_id?: string
         }
