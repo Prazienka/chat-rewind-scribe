@@ -1094,6 +1094,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     () =>
       recordings.filter(
         (recording) =>
+          Boolean(recording.stage) ||
           recording.status === "running" ||
           recording.refineStatus === "running" ||
           recording.summaryStatus === "running",
@@ -1105,6 +1106,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     () =>
       recordings.filter(
         (recording) =>
+          Boolean(recording.stage) ||
           recording.status === "running" ||
           recording.refineStatus === "running" ||
           recording.summaryStatus === "running",
