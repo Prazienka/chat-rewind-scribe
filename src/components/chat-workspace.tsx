@@ -803,21 +803,21 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     }
   }, [queueFlush, start, teardownGraph]);
 
+  // Zastavit smí pouze uživatel (tlačítko) nebo dosažení limitu 2 hodin.
   const stop = useCallback(async () => {
+    stoppingRef.current = true;
+    activeRef.current = false;
     setIsRecording(false);
     setLevel(0);
-    const ctx = ctxRef.current;
     // Mikrofonní stream necháváme naživu, aby oprávnění zůstalo a další nahrávání
     // nemuselo znovu žádat o přístup. Snímání jen vypneme a uvolníme až při odchodu.
     streamRef.current?.getAudioTracks().forEach((t) => {
       t.enabled = false;
     });
-    nodeRef.current?.disconnect();
-    nodeRef.current = null;
     await flushPromiseRef.current;
     await flushBuffer();
-    await ctx?.close();
-    ctxRef.current = null;
+    await teardownGraph();
+    stoppingRef.current = false;
 
     const segments = segmentsRef.current;
     const seconds = Math.max(elapsedRef.current, wavChunksDuration(segments));
