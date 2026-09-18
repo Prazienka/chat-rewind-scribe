@@ -746,6 +746,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         silent.connect(ctx.destination);
         elapsedRef.current = elapsedBaseRef.current;
         setElapsed(elapsedBaseRef.current);
+        activeRef.current = true;
         setIsRecording(true);
       } catch (err) {
         if (!liveStream()) {
