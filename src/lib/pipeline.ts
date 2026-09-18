@@ -89,7 +89,7 @@ async function transcribeChunk(
       if (text.trim()) return { text: text.trim() };
       lastError = "Přepis části nevrátil žádný text.";
     } catch {
-      lastError = "Spojení se přerušilo.";
+      lastError = "Spojení se přerušilo nebo vypršel časový limit.";
     } finally {
       clearTimeout(timeout);
     }
@@ -177,6 +177,7 @@ export async function processLongText(
   options: {
     payload?: Record<string, unknown>;
     limit?: number;
+    preserveInputOnFailure?: boolean;
     onPartial?: (text: string) => void;
     onProgress?: (progress: StageProgress) => void;
   } = {},
@@ -224,7 +225,11 @@ export async function processLongText(
     if (ok) done.push(output.trim());
     else {
       failed++;
-      done.push(`[část ${index + 1} se nepodařilo zpracovat]`);
+      done.push(
+        options.preserveInputOnFailure
+          ? part
+          : `[část ${index + 1} se nepodařilo zpracovat]`,
+      );
     }
     options.onPartial?.(done.join("\n\n"));
     options.onProgress?.({

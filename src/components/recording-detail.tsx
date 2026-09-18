@@ -57,6 +57,8 @@ export type RecordingView = {
   translationLang?: string;
   translationStatus?: "running" | "done" | "error";
   translationError?: string;
+  uploadProgress?: number;
+  uploadStatus?: "running" | "done" | "error";
 };
 
 type Props = {
@@ -194,6 +196,20 @@ export const RecordingDetail = memo(function RecordingDetail({
           </div>
           <Progress value={recording.progress ?? 0} className="mt-2 h-1.5" aria-label="Průběh zpracování" />
         </div>
+      ) : null}
+
+      {recording.uploadStatus === "running" ? (
+        <div className="border-b border-border bg-muted/30 px-4 py-3 sm:px-6" aria-live="polite">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="text-foreground">Ukládám zvuk po částech do cloudu</span>
+            <span className="tabular-nums text-muted-foreground">{recording.uploadProgress ?? 0} %</span>
+          </div>
+          <Progress value={recording.uploadProgress ?? 0} className="mt-2 h-1.5" aria-label="Průběh ukládání zvuku" />
+        </div>
+      ) : recording.uploadStatus === "error" ? (
+        <p className="border-b border-border bg-destructive/5 px-4 py-3 text-sm text-destructive sm:px-6" role="alert">
+          Zvuk je uložený v tomto zařízení, cloudové uložení se ale nedokončilo.
+        </p>
       ) : null}
 
       {!busy && recording.failedChunks ? (
