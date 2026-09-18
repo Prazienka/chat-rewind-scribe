@@ -657,12 +657,21 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
 
   /** Rozebere jen zvukový graf. Mikrofon ani nasbírané části se nikdy neruší. */
   const teardownGraph = useCallback(async () => {
-    nodeRef.current?.onaudioprocess = null;
-    nodeRef.current?.disconnect();
+    const node = nodeRef.current;
+    if (node) {
+      node.onaudioprocess = null;
+      node.disconnect();
+    }
     nodeRef.current = null;
     const ctx = ctxRef.current;
     ctxRef.current = null;
-    if (ctx && ctx.state !== "closed") await ctx.close().catch(() => {});
+    if (ctx && ctx.state !== "closed") {
+      try {
+        await ctx.close();
+      } catch {
+        /* ignore */
+      }
+    }
   }, []);
 
   const start = useCallback(
