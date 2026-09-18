@@ -872,6 +872,12 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       Boolean(streamRef.current?.getAudioTracks().some((t) => t.readyState === "live" && t.enabled));
 
     const healthCheck = async () => {
+      if (stoppingRef.current || sessionRef.current.stopRequested) return;
+      // Watchdog: i když prohlížeč žádnou událost nepošle, poznáme, že data přestala chodit.
+      if (isDataStale(sessionRef.current, Date.now())) {
+        dispatchSession({ type: "interrupted", at: Date.now(), reason: "no-data" });
+        void queueFlush();
+      }
       if (document.visibilityState !== "visible" || recoveringRef.current) return;
       void requestLock();
       const ctx = ctxRef.current;
@@ -882,15 +888,18 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           /* ignore */
         }
       }
-      if (!capturing()) await resumeCapture();
-      else setBackgroundNote(null);
+      if (!capturing() || isDataStale(sessionRef.current, Date.now())) await resumeCapture();
+      else {
+        dispatchSession({ type: "foreground", at: Date.now() });
+        setBackgroundNote(null);
+      }
     };
 
     const onVisibility = () => {
       if (document.visibilityState !== "visible") {
-        setBackgroundNote(
-          "Nahrávání pokračuje na pozadí, pokud to zařízení a prohlížeč dovolí. Po návratu se stav obnoví a uložené části se neztratí.",
-        );
+        // Pozadí nahrávku nikdy neukončuje – jen bezpečně odloží nasbíraný zvuk.
+        dispatchSession({ type: "background", at: Date.now() });
+        setBackgroundNote(backgroundCapabilityNote(navigator.userAgent));
         void queueFlush();
         return;
       }
@@ -905,6 +914,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       void queueFlush();
     };
     const onTrackLost = () => {
+      // Systémové přerušení (hovor, Siri, jiná aplikace) – data držíme, session nekončí.
+      dispatchSession({ type: "interrupted", at: Date.now(), reason: "track-lost" });
       void queueFlush();
       if (document.visibilityState === "visible") void healthCheck();
     };
@@ -914,7 +925,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       t.addEventListener("mute", onTrackLost);
     });
     // Záložní hlídač pro platformy, které visibilitychange ani ended nepošlou.
-    const watchdog = setInterval(() => void healthCheck(), 5000);
+    const watchdog = setInterval(() => void healthCheck(), 3000);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pageshow", onVisibility);
     window.addEventListener("focus", onVisibility);
