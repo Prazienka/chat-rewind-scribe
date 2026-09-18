@@ -10,6 +10,8 @@ export type CloudRecording = {
   rawTranscript?: string;
   summary?: string;
   summaryStatus?: "running" | "done" | "error";
+  translation?: string;
+  translationLang?: string;
   group?: string;
   hasAudio?: boolean;
   audioName?: string;
@@ -24,6 +26,8 @@ type Row = {
   transcript: string | null;
   raw_transcript: string | null;
   summary: string | null;
+  translation: string | null;
+  translation_lang: string | null;
   status: string | null;
   audio_name: string | null;
   audio_path: string | null;
@@ -42,6 +46,8 @@ const fromRow = (row: Row): CloudRecording => ({
   rawTranscript: row.raw_transcript ?? "",
   summary: row.summary ?? "",
   ...(row.summary ? { summaryStatus: "done" as const } : {}),
+  translation: row.translation ?? "",
+  translationLang: row.translation_lang ?? "",
   group: row.group_name ?? "",
   hasAudio: Boolean(row.audio_path),
   audioName: row.audio_name ?? "",
@@ -52,7 +58,7 @@ export async function fetchCloudRecordings(): Promise<CloudRecording[]> {
   const { data, error } = await supabase
     .from("recordings")
     .select(
-      "id,title,group_name,duration,transcript,raw_transcript,summary,status,audio_name,audio_path,created_at",
+      "id,title,group_name,duration,transcript,raw_transcript,summary,translation,translation_lang,status,audio_name,audio_path,created_at",
     )
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -70,6 +76,8 @@ export async function upsertCloudRecording(userId: string, rec: CloudRecording) 
       transcript: rec.transcript ?? "",
       raw_transcript: rec.rawTranscript || null,
       summary: rec.summary || null,
+      translation: rec.translation || null,
+      translation_lang: rec.translationLang || null,
       status: rec.status ?? "done",
       audio_name: rec.audioName || null,
       audio_path: rec.audioPath || null,
