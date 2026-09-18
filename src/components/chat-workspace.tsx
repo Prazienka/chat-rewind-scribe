@@ -197,6 +197,16 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const pendingRef = useRef<{ session: string; segments: Blob[]; seconds: number } | null>(null);
   const audioUrlsRef = useRef<Record<string, string>>({});
 
+  // Mikrofon uvolníme teprve při odchodu ze stránky, ne po dokončení nahrávky.
+  useEffect(
+    () => () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    },
+    [],
+  );
+
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -645,10 +655,18 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
-        });
+        // Jednou povolený mikrofon si držíme, aby prohlížeč oprávnění znovu nevyžadoval.
+        const existing = streamRef.current;
+        const live = existing?.getAudioTracks().some((t) => t.readyState === "live");
+        const stream = live
+          ? existing!
+          : await navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true },
+            });
         streamRef.current = stream;
+        stream.getAudioTracks().forEach((t) => {
+          t.enabled = true;
+        });
         const ctx = new AudioContext();
         ctxRef.current = ctx;
         if (ctx.state === "suspended") await ctx.resume();
@@ -685,13 +703,19 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           setLevel(peak);
         };
         source.connect(node);
-        node.connect(ctx.destination);
+        // Tichý výstup: procesor musí být připojený k výstupu, ale mikrofon se nikdy nepřehraje.
+        const silent = ctx.createGain();
+        silent.gain.value = 0;
+        node.connect(silent);
+        silent.connect(ctx.destination);
         elapsedRef.current = elapsedBaseRef.current;
         setElapsed(elapsedBaseRef.current);
         setIsRecording(true);
       } catch (err) {
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
+        if (!streamRef.current?.getAudioTracks().some((t) => t.readyState === "live")) {
+          streamRef.current?.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
         const name = (err as { name?: string })?.name ?? "";
         const inFrame = typeof window !== "undefined" && window.self !== window.top;
         if (name === "NotAllowedError" || name === "SecurityError") {
@@ -717,8 +741,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     setIsRecording(false);
     setLevel(0);
     const ctx = ctxRef.current;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    // Mikrofonní stream necháváme naživu, aby oprávnění zůstalo a další nahrávání
+    // nemuselo znovu žádat o přístup. Snímání jen vypneme a uvolníme až při odchodu.
+    streamRef.current?.getAudioTracks().forEach((t) => {
+      t.enabled = false;
+    });
     nodeRef.current?.disconnect();
     nodeRef.current = null;
     await flushPromiseRef.current;
