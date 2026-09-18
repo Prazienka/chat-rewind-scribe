@@ -626,10 +626,19 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     const session = sessionIdRef.current;
     if (!session) return;
     await saveSegment(session, index, blob);
+    dispatchSession({
+      type: "checkpoint",
+      at: Date.now(),
+      segments: index + 1,
+      seconds: Math.max(elapsedRef.current, wavChunksDuration(segmentsRef.current)),
+    });
     try {
+      const snapshot = toPersistedSession(sessionRef.current);
       localStorage.setItem(
         DRAFT_KEY,
-        JSON.stringify({ session, seconds: elapsedRef.current, segments: index + 1 }),
+        JSON.stringify(
+          snapshot ?? { session, seconds: elapsedRef.current, segments: index + 1 },
+        ),
       );
     } catch {
       /* ignore */
