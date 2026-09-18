@@ -670,7 +670,6 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           pcmRef.current.push(new Float32Array(data));
           pcmSamplesRef.current += data.length;
           const capturedSeconds =
-            elapsedBaseRef.current +
             wavChunksDuration(segmentsRef.current) +
             pcmSamplesRef.current / ctx.sampleRate;
           if (capturedSeconds >= MAX_RECORDING_SECONDS && !autoStopRequestedRef.current) {
@@ -785,14 +784,20 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       }
     };
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      void queueFlush();
       event.preventDefault();
       event.returnValue = "";
     };
+    const onPageHide = () => {
+      void queueFlush();
+    };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onPageHide);
       if (!released) {
         released = true;
         void lock?.release().catch(() => {});
