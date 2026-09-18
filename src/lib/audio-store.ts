@@ -15,7 +15,7 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-type StoredAudio = { blob: Blob; filename: string };
+type StoredAudio = { blob?: Blob; filename: string; segmentSession?: string };
 
 export async function saveAudio(id: string, blob: Blob, filename: string): Promise<void> {
   try {
@@ -32,7 +32,23 @@ export async function saveAudio(id: string, blob: Blob, filename: string): Promi
   }
 }
 
-export async function loadAudio(id: string): Promise<StoredAudio | null> {
+/** Připojí již uložené segmenty k hotové nahrávce bez vytvoření druhé velké kopie. */
+export async function saveSegmentedAudio(
+  id: string,
+  segmentSession: string,
+  filename: string,
+): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put({ filename, segmentSession } satisfies StoredAudio, id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+export async function loadAudio(id: string): Promise<{ blob: Blob; filename: string } | null> {
   try {
     const db = await openDb();
     const result = await new Promise<StoredAudio | null>((resolve, reject) => {
@@ -42,7 +58,13 @@ export async function loadAudio(id: string): Promise<StoredAudio | null> {
       req.onerror = () => reject(req.error);
     });
     db.close();
-    return result;
+    if (!result) return null;
+    if (result.blob) return { blob: result.blob, filename: result.filename };
+    if (!result.segmentSession) return null;
+    const segments = await loadSegments(result.segmentSession);
+    if (segments.length === 0) return null;
+    const { mergeWavBlobs } = await import("./audio-chunks");
+    return { blob: mergeWavBlobs(segments), filename: result.filename };
   } catch {
     return null;
   }
@@ -51,6 +73,12 @@ export async function loadAudio(id: string): Promise<StoredAudio | null> {
 export async function deleteAudio(id: string): Promise<void> {
   try {
     const db = await openDb();
+    const stored = await new Promise<StoredAudio | null>((resolve) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).get(id);
+      req.onsuccess = () => resolve((req.result as StoredAudio | undefined) ?? null);
+      req.onerror = () => resolve(null);
+    });
     await new Promise<void>((resolve) => {
       const tx = db.transaction(STORE, "readwrite");
       tx.objectStore(STORE).delete(id);
@@ -58,6 +86,7 @@ export async function deleteAudio(id: string): Promise<void> {
       tx.onerror = () => resolve();
     });
     db.close();
+    if (stored?.segmentSession) await deleteSegments(stored.segmentSession);
   } catch {
     /* ignore */
   }
@@ -70,18 +99,14 @@ export async function deleteAudio(id: string): Promise<void> {
 const segmentKey = (session: string, index: number) => `${session}:${String(index).padStart(5, "0")}`;
 
 export async function saveSegment(session: string, index: number, blob: Blob): Promise<void> {
-  try {
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(SEGMENTS, "readwrite");
-      tx.objectStore(SEGMENTS).put(blob, segmentKey(session, index));
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
-  } catch {
-    /* ignore – segment zůstane aspoň v paměti */
-  }
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(SEGMENTS, "readwrite");
+    tx.objectStore(SEGMENTS).put(blob, segmentKey(session, index));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
 }
 
 export async function loadSegments(session: string): Promise<Blob[]> {

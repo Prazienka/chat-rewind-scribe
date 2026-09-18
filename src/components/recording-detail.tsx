@@ -48,7 +48,7 @@ export type RecordingView = {
   summaryError?: string;
   group?: string;
   hasAudio?: boolean;
-  stage?: "prepare" | "transcribe" | "refine" | "summary" | "translate" | undefined;
+  stage?: "prepare" | "upload" | "transcribe" | "refine" | "summary" | "translate" | undefined;
   progress?: number;
   stageDetail?: string;
   chunkCount?: number;
@@ -90,6 +90,7 @@ const TRANSLATION_LANGS = [
 
 const STAGE_LABELS: Record<string, string> = {
   prepare: "Připravuji zvuk k přepisu",
+  upload: "Ukládám zvuk do cloudu",
   transcribe: "Přepisuji zvuk",
   refine: "Upravuji češtinu",
   summary: "Tvořím shrnutí",
