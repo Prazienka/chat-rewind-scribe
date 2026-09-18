@@ -654,6 +654,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
               audio: { echoCancellation: true, noiseSuppression: true },
             });
         streamRef.current = stream;
+        stream.getAudioTracks().forEach((t) => {
+          t.enabled = true;
+        });
         const ctx = new AudioContext();
         ctxRef.current = ctx;
         if (ctx.state === "suspended") await ctx.resume();
