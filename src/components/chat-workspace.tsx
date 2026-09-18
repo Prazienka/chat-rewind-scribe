@@ -189,6 +189,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const autoStopRequestedRef = useRef(false);
   const startingRef = useRef(false);
   const recoveringRef = useRef(false);
+  const stoppingRef = useRef(false);
+  /** Běží uživatelská nahrávací session? Ukončí ji jen tlačítko nebo limit. */
+  const activeRef = useRef(false);
   const sampleRateRef = useRef(48000);
   const sessionIdRef = useRef<string | null>(null);
   const segmentsRef = useRef<Blob[]>([]);
