@@ -83,6 +83,17 @@ import {
   wavChunksDuration,
 } from "@/lib/audio-chunks";
 import { processLongText, transcribeChunks } from "@/lib/pipeline";
+import {
+  initialSessionState,
+  isDataStale,
+  parsePersistedSession,
+  reduceSession,
+  sessionLabel,
+  toPersistedSession,
+  type RecordingEvent,
+  type RecordingSessionState,
+} from "@/lib/recording-session";
+import { backgroundCapabilityNote } from "@/lib/native-recorder";
 
 type Recording = {
   id: string;
