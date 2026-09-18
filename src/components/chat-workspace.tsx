@@ -335,6 +335,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           title: rec.title ?? "",
           rawTranscript: rec.rawTranscript ?? "",
           summary: rec.summary ?? "",
+          translation: rec.translation ?? "",
+          translationLang: rec.translationLang ?? "",
           group: rec.group ?? "",
           audioName: rec.audioName ?? "",
           audioPath: rec.audioPath ?? "",
