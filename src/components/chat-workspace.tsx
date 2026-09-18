@@ -728,8 +728,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     setIsRecording(false);
     setLevel(0);
     const ctx = ctxRef.current;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    // Mikrofonní stream necháváme naživu, aby oprávnění zůstalo a další nahrávání
+    // nemuselo znovu žádat o přístup. Uvolní se až při odchodu ze stránky.
     nodeRef.current?.disconnect();
     nodeRef.current = null;
     await flushPromiseRef.current;
