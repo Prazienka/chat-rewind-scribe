@@ -26,3 +26,11 @@
 - [x] Ukládat živou nahrávku po 30 s a při odchodu aplikace do pozadí
 - [x] Nahrávat velký zvuk do cloudu po částech s opakováním a průběhem
 - [x] Přidat časové limity požadavků a obnovu přerušeného zpracování
+
+# Spolehlivé nahrávání na pozadí
+- [x] Stavový automat session oddělený od UI (recording/background/interrupted/recovering/saved/error)
+- [x] Watchdog podle času posledních dat z mikrofonu
+- [x] Persistované info o session (poslední část, potvrzené části, čeká obnova)
+- [x] Stop má prioritu nad obnovou, cleanup až po uzavření poslední části
+- [x] Stavové hlášky v UI a rozšiřovací bod pro nativní obal
+- [x] Automatické testy lifecyclu nahrávání
