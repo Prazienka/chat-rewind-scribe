@@ -1050,6 +1050,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     elapsedRef.current = 0;
     setElapsed(0);
     setBackgroundNote(null);
+    dispatchSession({ type: "discarded", at: Date.now() });
     if (held) void deleteSegments(held.session);
     try {
       localStorage.removeItem(DRAFT_KEY);
