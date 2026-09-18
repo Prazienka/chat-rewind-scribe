@@ -842,8 +842,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     void stop();
   }, [elapsed, isRecording, stop]);
 
-  // Na mobilu se snažíme udržet nahrávání i při přepnutí aplikace do pozadí.
-  // Prohlížeč to negarantuje, proto při návratu vždy obnovíme zvukový kontext.
+  // Nahrávání držíme i na pozadí a při zamknutém displeji. Žádná automatická událost
+  // nahrávku neukončuje – jen bezpečně ukládá části a po návratu snímání obnoví.
   useEffect(() => {
     if (!isRecording) return;
     let lock: WakeLockSentinel | null = null;
@@ -861,6 +861,26 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     };
     void requestLock();
 
+    /** Snímá zvuk skutečně dál? */
+    const capturing = () =>
+      ctxRef.current?.state === "running" &&
+      Boolean(streamRef.current?.getAudioTracks().some((t) => t.readyState === "live" && t.enabled));
+
+    const healthCheck = async () => {
+      if (document.visibilityState !== "visible" || recoveringRef.current) return;
+      void requestLock();
+      const ctx = ctxRef.current;
+      if (ctx && ctx.state === "suspended") {
+        try {
+          await ctx.resume();
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!capturing()) await resumeCapture();
+      else setBackgroundNote(null);
+    };
+
     const onVisibility = () => {
       if (document.visibilityState !== "visible") {
         setBackgroundNote(
@@ -869,13 +889,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         void queueFlush();
         return;
       }
-      void ctxRef.current?.resume();
-      void requestLock();
-      if (ctxRef.current?.state !== "running") {
-        setBackgroundNote(
-          "Prohlížeč nahrávání na pozadí pozastavil. Už uložené části zůstaly zachovány – pokračujte nahráváním, nebo nahrávku uložte.",
-        );
-      }
+      void healthCheck();
     };
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       void queueFlush();
@@ -885,11 +899,31 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     const onPageHide = () => {
       void queueFlush();
     };
+    const onTrackLost = () => {
+      void queueFlush();
+      if (document.visibilityState === "visible") void healthCheck();
+    };
+    const tracks = streamRef.current?.getAudioTracks() ?? [];
+    tracks.forEach((t) => {
+      t.addEventListener("ended", onTrackLost);
+      t.addEventListener("mute", onTrackLost);
+    });
+    // Záložní hlídač pro platformy, které visibilitychange ani ended nepošlou.
+    const watchdog = setInterval(() => void healthCheck(), 5000);
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onVisibility);
+    window.addEventListener("focus", onVisibility);
     window.addEventListener("beforeunload", onBeforeUnload);
     window.addEventListener("pagehide", onPageHide);
     return () => {
+      clearInterval(watchdog);
+      tracks.forEach((t) => {
+        t.removeEventListener("ended", onTrackLost);
+        t.removeEventListener("mute", onTrackLost);
+      });
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onVisibility);
+      window.removeEventListener("focus", onVisibility);
       window.removeEventListener("beforeunload", onBeforeUnload);
       window.removeEventListener("pagehide", onPageHide);
       if (!released) {
@@ -897,7 +931,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         void lock?.release().catch(() => {});
       }
     };
-  }, [isRecording, queueFlush]);
+  }, [isRecording, queueFlush, resumeCapture]);
 
   // Po pádu, restartu nebo zavření aplikace najdeme rozpracovanou nahrávku.
   useEffect(() => {
