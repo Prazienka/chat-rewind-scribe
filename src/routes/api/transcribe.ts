@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-const MAX_BYTES = 14 * 1024 * 1024;
+// Klient posílá zvuk po segmentech (max ~4 minuty, 16 kHz mono ≈ 8 MB).
+// Limit je proto nastavený s rezervou, ne jako strop délky nahrávky.
+const MAX_BYTES = 30 * 1024 * 1024;
 
 export const Route = createFileRoute("/api/transcribe")({
   server: {
