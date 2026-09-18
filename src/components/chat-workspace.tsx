@@ -838,6 +838,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     const seconds = Math.max(elapsedRef.current, wavChunksDuration(segments));
     if (segments.length === 0 || seconds < 0.3) {
       toast.error("Nahrávka byla prázdná – zkuste to prosím znovu.");
+      dispatchSession({ type: "discarded", at: Date.now() });
       elapsedBaseRef.current = 0;
       elapsedRef.current = 0;
       setElapsed(0);
