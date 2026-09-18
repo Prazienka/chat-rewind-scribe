@@ -16,6 +16,9 @@ import {
   X,
   Languages,
   RotateCcw,
+  ArrowLeft,
+  CalendarDays,
+  Clock3,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -163,6 +166,9 @@ export const RecordingDetail = memo(function RecordingDetail({
     <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <header className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-border p-4 sm:p-6">
         <div className="min-w-0">
+          <Button variant="ghost" className="mb-3 -ml-3 min-h-11 lg:hidden" onClick={onClose}>
+            <ArrowLeft aria-hidden="true" /> Zpět do knihovny
+          </Button>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Badge variant={status.tone} className="gap-1.5">
               {recording.status === "running" || recording.refineStatus === "running" || recording.summaryStatus === "running" ? (
@@ -175,8 +181,9 @@ export const RecordingDetail = memo(function RecordingDetail({
           <h2 className="truncate font-display text-xl font-semibold text-foreground sm:text-2xl">
             {recording.title || new Date(recording.createdAt).toLocaleString("cs-CZ")}
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {new Date(recording.createdAt).toLocaleString("cs-CZ")} · {formatDuration(recording.duration)}
+          <p className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5"><CalendarDays className="size-4" aria-hidden="true" />{new Date(recording.createdAt).toLocaleString("cs-CZ")}</span>
+            <span className="inline-flex items-center gap-1.5"><Clock3 className="size-4" aria-hidden="true" />{formatDuration(recording.duration)}</span>
           </p>
         </div>
         <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Zavřít detail" onClick={onClose}>
@@ -359,7 +366,8 @@ export const RecordingDetail = memo(function RecordingDetail({
             <Button variant="ghost" className="min-h-11" onClick={onExportAudio}><Music aria-hidden="true" /> Export zvuku</Button>
           </>
         ) : null}
-        <Button variant="ghost" className="min-h-11 text-destructive hover:text-destructive sm:ml-auto" onClick={onDelete}><Trash2 aria-hidden="true" /> Smazat</Button>
+        <span className="hidden flex-1 sm:block" />
+        <Button variant="ghost" className="min-h-11 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onDelete}><Trash2 aria-hidden="true" /> Smazat nahrávku</Button>
         {audioUrl ? <audio className="w-full" controls src={audioUrl}>Váš prohlížeč nepodporuje přehrávání zvuku.</audio> : null}
       </footer>
     </article>
