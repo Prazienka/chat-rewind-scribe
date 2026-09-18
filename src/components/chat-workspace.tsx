@@ -1018,6 +1018,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     elapsedRef.current = 0;
     setElapsed(0);
     setBackgroundNote(null);
+    dispatchSession({ type: "saved", at: Date.now() });
     autoStopRequestedRef.current = false;
     try {
       localStorage.removeItem(DRAFT_KEY);
