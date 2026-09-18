@@ -140,10 +140,11 @@ const recoverInterruptedProcessing = (recording: Recording): Recording => {
     ...recording,
     status: "error",
     stage: undefined,
-    refineStatus: recording.refineStatus === "running" ? "error" : recording.refineStatus,
-    summaryStatus: recording.summaryStatus === "running" ? "error" : recording.summaryStatus,
-    translationStatus:
-      recording.translationStatus === "running" ? "error" : recording.translationStatus,
+    ...(recording.refineStatus === "running" ? { refineStatus: "error" as const } : {}),
+    ...(recording.summaryStatus === "running" ? { summaryStatus: "error" as const } : {}),
+    ...(recording.translationStatus === "running"
+      ? { translationStatus: "error" as const }
+      : {}),
     error: "Zpracování bylo přerušeno. Můžete bezpečně pokračovat tlačítkem Zkusit přepis znovu.",
   };
 };
