@@ -783,8 +783,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
    */
   const resumeCapture = useCallback(async () => {
     if (recoveringRef.current || stoppingRef.current || !activeRef.current) return;
+    if (sessionRef.current.stopRequested) return;
     recoveringRef.current = true;
-    setBackgroundNote("Obnovuji nahrávání po návratu z pozadí…");
+    dispatchSession({ type: "recovering", at: Date.now() });
+    setBackgroundNote("Obnovuji nahrávání po přerušení. Uložené části zůstávají zachované.");
     try {
       await queueFlush();
       await teardownGraph();
@@ -793,11 +795,15 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         wavChunksDuration(segmentsRef.current),
         elapsedBaseRef.current,
       );
+      // Stop, který přišel během obnovy, má přednost – nahrávání už nerozbíháme.
+      if (sessionRef.current.stopRequested || !activeRef.current) return;
       await start(true);
+      dispatchSession({ type: "recovered", at: Date.now() });
       setBackgroundNote(
         "Nahrávání pokračuje. Části uložené před přerušením zůstaly zachované.",
       );
     } catch {
+      dispatchSession({ type: "recovery-failed", at: Date.now(), reason: "resume-failed" });
       setBackgroundNote(
         "Systém nahrávání pozastavil a zatím ho nelze obnovit. Uložené části jsou v bezpečí – klepněte na Začít nahrávat pro pokračování, nebo nahrávku uložte.",
       );
@@ -811,14 +817,18 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   // Zastavit smí pouze uživatel (tlačítko) nebo dosažení limitu 2 hodin.
   const stop = useCallback(async () => {
     stoppingRef.current = true;
+    // Stop má nejvyšší prioritu: od teď žádná obnova session nevzkřísí.
+    dispatchSession({ type: "user-stop", at: Date.now() });
     activeRef.current = false;
     setIsRecording(false);
     setLevel(0);
+    setBackgroundNote(null);
     // Mikrofonní stream necháváme naživu, aby oprávnění zůstalo a další nahrávání
     // nemuselo znovu žádat o přístup. Snímání jen vypneme a uvolníme až při odchodu.
     streamRef.current?.getAudioTracks().forEach((t) => {
       t.enabled = false;
     });
+    // Cleanup až po bezpečném uzavření poslední části.
     await flushPromiseRef.current;
     await flushBuffer();
     await teardownGraph();
