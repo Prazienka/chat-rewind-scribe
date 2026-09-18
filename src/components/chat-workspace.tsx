@@ -1245,7 +1245,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
               >
                 <Upload aria-hidden="true" /> Importovat zvuk
               </Button>
-              <p className="mt-2 text-center text-xs text-muted-foreground">MP3, WAV, M4A a další · max. 14 MB</p>
+              <p className="mt-2 text-center text-xs text-muted-foreground">MP3, WAV, M4A a další · až 2 hodiny (max. 300 MB)</p>
               <div className="mt-5 flex items-start gap-2 border-t border-border pt-5 text-xs leading-5 text-muted-foreground">
                 {syncing ? <CloudUpload className="mt-0.5 size-4 shrink-0 animate-pulse" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />}
                 <span>{user ? (syncing ? "Synchronizuji vaše záznamy…" : "Záznamy jsou dostupné na vašich zařízeních.") : "Bez přihlášení zůstanou záznamy pouze v tomto zařízení."}</span>
