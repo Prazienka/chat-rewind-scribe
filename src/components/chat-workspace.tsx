@@ -778,7 +778,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
    * ani čas se nikdy nezahazují – jen se znovu rozběhne zvukový graf.
    */
   const resumeCapture = useCallback(async () => {
-    if (recoveringRef.current) return;
+    if (recoveringRef.current || stoppingRef.current || !activeRef.current) return;
     recoveringRef.current = true;
     setBackgroundNote("Obnovuji nahrávání po návratu z pozadí…");
     try {
