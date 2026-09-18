@@ -325,6 +325,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     const timer = setTimeout(() => {
       for (const rec of recordings) {
         if (rec.status === "running" || rec.summaryStatus === "running") continue;
+        if (rec.stage || rec.translationStatus === "running") continue;
         const snapshot = JSON.stringify({
           id: rec.id,
           createdAt: rec.createdAt,
