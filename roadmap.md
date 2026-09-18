@@ -34,3 +34,11 @@
 - [x] Stop má prioritu nad obnovou, cleanup až po uzavření poslední části
 - [x] Stavové hlášky v UI a rozšiřovací bod pro nativní obal
 - [x] Automatické testy lifecyclu nahrávání
+
+# UX/UI redesign 2026
+- [x] Jednoznačná primární akce Nová nahrávka
+- [x] Zjednodušená navigace Nahrávání / Knihovna
+- [x] Stavové a průběhové informace pro nahrávání a zpracování
+- [x] Knihovna s hledáním a filtry podle stavu, data a složky
+- [x] Přehlednější detail přepisu a oddělené destruktivní akce
+- [ ] Ověřit desktop, mobil, přístupnost a hlavní interakce
