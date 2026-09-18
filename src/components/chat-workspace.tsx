@@ -645,9 +645,14 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
-        });
+        // Jednou povolený mikrofon si držíme, aby prohlížeč oprávnění znovu nevyžadoval.
+        const existing = streamRef.current;
+        const live = existing?.getAudioTracks().some((t) => t.readyState === "live");
+        const stream = live
+          ? existing!
+          : await navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true },
+            });
         streamRef.current = stream;
         const ctx = new AudioContext();
         ctxRef.current = ctx;
