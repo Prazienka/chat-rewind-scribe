@@ -729,7 +729,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     setLevel(0);
     const ctx = ctxRef.current;
     // Mikrofonní stream necháváme naživu, aby oprávnění zůstalo a další nahrávání
-    // nemuselo znovu žádat o přístup. Uvolní se až při odchodu ze stránky.
+    // nemuselo znovu žádat o přístup. Snímání jen vypneme a uvolníme až při odchodu.
+    streamRef.current?.getAudioTracks().forEach((t) => {
+      t.enabled = false;
+    });
     nodeRef.current?.disconnect();
     nodeRef.current = null;
     await flushPromiseRef.current;
