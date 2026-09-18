@@ -23,3 +23,6 @@
 - [x] Obnova rozpracované nahrávky po návratu z pozadí
 - [x] Ukládání překladu do cloudu
 - [x] Ověřit typy, build, přepis 4min segmentu, překlad, desktop i mobil
+- [x] Ukládat živou nahrávku po 30 s a při odchodu aplikace do pozadí
+- [x] Nahrávat velký zvuk do cloudu po částech s opakováním a průběhem
+- [x] Přidat časové limity požadavků a obnovu přerušeného zpracování

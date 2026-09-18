@@ -35,7 +35,6 @@ import {
   fetchCloudRecordings,
   upsertCloudRecording,
   deleteCloudRecording,
-  uploadCloudAudio,
   uploadCloudAudioChunks,
   downloadCloudAudio,
   fetchCloudGroups,
@@ -77,7 +76,6 @@ import {
   MAX_IMPORT_BYTES,
   MAX_RECORDING_SECONDS,
   RECORDING_CHECKPOINT_SECONDS,
-  SEGMENT_SECONDS,
   TARGET_RATE,
   coalesceWavChunks,
   fileToWavChunks,
@@ -128,6 +126,28 @@ const LANGS = [
   { value: "de", label: "Němčina" },
 ];
 
+const recoverInterruptedProcessing = (recording: Recording): Recording => {
+  if (
+    recording.status !== "running" &&
+    !recording.stage &&
+    recording.refineStatus !== "running" &&
+    recording.summaryStatus !== "running" &&
+    recording.translationStatus !== "running"
+  ) {
+    return recording;
+  }
+  return {
+    ...recording,
+    status: "error",
+    stage: undefined,
+    refineStatus: recording.refineStatus === "running" ? "error" : recording.refineStatus,
+    summaryStatus: recording.summaryStatus === "running" ? "error" : recording.summaryStatus,
+    translationStatus:
+      recording.translationStatus === "running" ? "error" : recording.translationStatus,
+    error: "Zpracování bylo přerušeno. Můžete bezpečně pokračovat tlačítkem Zkusit přepis znovu.",
+  };
+};
+
 type WakeLockSentinel = { release: () => Promise<void> };
 
 type ChatWorkspaceProps = {
@@ -165,6 +185,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const pcmSamplesRef = useRef(0);
   const flushingRef = useRef(false);
   const flushPromiseRef = useRef<Promise<void> | null>(null);
+  const autoStopRequestedRef = useRef(false);
   const sampleRateRef = useRef(48000);
   const sessionIdRef = useRef<string | null>(null);
   const segmentsRef = useRef<Blob[]>([]);
@@ -178,7 +199,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setRecordings(JSON.parse(raw));
+      if (raw) {
+        const stored = JSON.parse(raw) as Recording[];
+        setRecordings(stored.map(recoverInterruptedProcessing));
+      }
       const rawGroups = localStorage.getItem(GROUPS_KEY);
       if (rawGroups) setGroups(JSON.parse(rawGroups));
       const activeGroup = localStorage.getItem(ACTIVE_GROUP_KEY);
@@ -293,7 +317,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         for (const rec of cloud) syncedRef.current[rec.id] = JSON.stringify(rec);
         setRecordings((prev) => {
           const map = new Map<string, Recording>();
-          for (const rec of cloud) map.set(rec.id, rec as Recording);
+          for (const rec of cloud) map.set(rec.id, recoverInterruptedProcessing(rec as Recording));
           for (const rec of prev) if (!map.has(rec.id)) map.set(rec.id, rec);
           const merged = [...map.values()].sort((a, b) => b.createdAt - a.createdAt);
           try {
@@ -357,20 +381,6 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     }, 1200);
     return () => clearTimeout(timer);
   }, [recordings, user]);
-
-  const storeAudio = useCallback(
-    async (id: string, blob: Blob, filename: string) => {
-      await saveAudio(id, blob, filename);
-      if (!user) return;
-      try {
-        const path = await uploadCloudAudio(user.id, id, blob, filename);
-        update(id, { audioPath: path });
-      } catch {
-        /* zvuk zůstane aspoň v zařízení */
-      }
-    },
-    [update, user],
-  );
 
   const getAudio = useCallback(async (rec: Recording) => {
     const local = await loadAudio(rec.id);
@@ -652,12 +662,21 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           segmentsRef.current = [];
           setSegmentCount(0);
           elapsedBaseRef.current = 0;
+          autoStopRequestedRef.current = false;
         }
         const perSegment = RECORDING_CHECKPOINT_SECONDS * ctx.sampleRate;
         node.onaudioprocess = (e) => {
           const data = e.inputBuffer.getChannelData(0);
           pcmRef.current.push(new Float32Array(data));
           pcmSamplesRef.current += data.length;
+          const capturedSeconds =
+            elapsedBaseRef.current +
+            wavChunksDuration(segmentsRef.current) +
+            pcmSamplesRef.current / ctx.sampleRate;
+          if (capturedSeconds >= MAX_RECORDING_SECONDS && !autoStopRequestedRef.current) {
+            autoStopRequestedRef.current = true;
+            setElapsed(MAX_RECORDING_SECONDS);
+          }
           if (pcmSamplesRef.current >= perSegment && !flushingRef.current) {
             void queueFlush();
           }
@@ -861,6 +880,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     elapsedRef.current = 0;
     setElapsed(0);
     setBackgroundNote(null);
+    autoStopRequestedRef.current = false;
     try {
       localStorage.removeItem(DRAFT_KEY);
     } catch {
@@ -949,8 +969,6 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         }
         return next;
       });
-      void storeAudio(id, file, file.name);
-
       // Dlouhý soubor rozdělíme na segmenty, aby se přepis nezasekl na velikosti.
       let chunks: Blob[] = [];
       try {
@@ -961,9 +979,23 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       if (!duration) {
         update(id, { duration: wavChunksDuration(chunks) });
       }
+      void saveAudio(id, file, file.name);
+      if (user) {
+        update(id, { uploadStatus: "running", uploadProgress: 0 });
+        void uploadCloudAudioChunks(user.id, id, chunks, (done, total) => {
+          update(id, { uploadProgress: Math.round((done / total) * 100) });
+        })
+          .then((audioPath) =>
+            update(id, { audioPath, uploadStatus: "done", uploadProgress: 100 }),
+          )
+          .catch(() => {
+            update(id, { uploadStatus: "error" });
+            toast.error("Zvuk zůstal v tomto zařízení, ale cloudové uložení se přerušilo.");
+          });
+      }
       void runPipeline(id, chunks, language);
     },
-    [language, recordingGroup, runPipeline, storeAudio, update],
+    [language, recordingGroup, runPipeline, update, user],
   );
 
   const remove = (id: string) => {
