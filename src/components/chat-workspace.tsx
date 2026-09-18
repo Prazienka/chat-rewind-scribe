@@ -1008,10 +1008,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const raw = localStorage.getItem(DRAFT_KEY);
-        if (!raw) return;
-        const draft = JSON.parse(raw) as { session?: string; seconds?: number };
-        if (!draft.session) return;
+        const draft = parsePersistedSession(localStorage.getItem(DRAFT_KEY));
+        if (!draft) return;
         const segments = await loadSegments(draft.session);
         if (cancelled) return;
         if (segments.length === 0) {
@@ -1026,6 +1024,12 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         elapsedBaseRef.current = seconds;
         elapsedRef.current = seconds;
         setElapsed(seconds);
+        // Session byla přerušená, ne dokončená – uživatel rozhodne, zda uloží nebo pokračuje.
+        if (draft.active || draft.awaitingRecovery) {
+          setBackgroundNote(
+            "Nahrávání bylo přerušeno dřív, než jste ho ukončili. Uložené části zůstaly zachované.",
+          );
+        }
         setPending({ duration: seconds, segments: segments.length, recovered: true });
       } catch {
         /* ignore */
