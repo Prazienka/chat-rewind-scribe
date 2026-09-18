@@ -801,6 +801,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       setBackgroundNote(
         "Systém nahrávání pozastavil a zatím ho nelze obnovit. Uložené části jsou v bezpečí – klepněte na Začít nahrávat pro pokračování, nebo nahrávku uložte.",
       );
+      activeRef.current = false;
       setIsRecording(false);
     } finally {
       recoveringRef.current = false;
