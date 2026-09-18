@@ -884,6 +884,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         /* ignore */
       }
 
+      if (duration > MAX_RECORDING_SECONDS) {
+        toast.error("Zvuk je delší než 2 hodiny. Rozdělte ho prosím na kratší části.");
+        return;
+      }
+
       const id = crypto.randomUUID();
       const entry: Recording = {
         id,
