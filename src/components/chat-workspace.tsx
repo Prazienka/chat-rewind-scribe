@@ -1274,13 +1274,34 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                     <div>
                       <h2 className="font-display text-sm font-semibold text-foreground">Zpracování nahrávky</h2>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        {processingRecordings[0]?.status === "running" ? "Přepisuji zvuk…" : processingRecordings[0]?.refineStatus === "running" ? "Upravuji češtinu…" : "Tvořím AI shrnutí…"}
+                        {(() => {
+                          const first = processingRecordings[0];
+                          const stage = first?.stage;
+                          const label =
+                            stage === "prepare"
+                              ? "Připravuji zvuk…"
+                              : stage === "transcribe"
+                                ? "Přepisuji zvuk…"
+                                : stage === "refine"
+                                  ? "Upravuji češtinu…"
+                                  : stage === "summary"
+                                    ? "Tvořím AI shrnutí…"
+                                    : stage === "translate"
+                                      ? "Překládám…"
+                                      : first?.status === "running"
+                                        ? "Přepisuji zvuk…"
+                                        : first?.refineStatus === "running"
+                                          ? "Upravuji češtinu…"
+                                          : "Tvořím AI shrnutí…";
+                          const detail = first?.stageDetail;
+                          return detail ? `${label} část ${detail}` : label;
+                        })()}
                       </p>
                     </div>
                   </div>
                   <Badge variant="secondary">{processingCount}</Badge>
                 </div>
-                <Progress value={processingRecordings[0]?.status === "running" ? 35 : processingRecordings[0]?.refineStatus === "running" ? 65 : 85} className="mt-4 h-1.5" aria-label="Průběh zpracování" />
+                <Progress value={processingRecordings[0]?.progress ?? 10} className="mt-4 h-1.5" aria-label="Průběh zpracování" />
               </div>
             ) : null}
             <div className="mt-5 flex justify-center">
