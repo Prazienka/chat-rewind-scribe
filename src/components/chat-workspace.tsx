@@ -718,12 +718,23 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           setSegmentCount(0);
           elapsedBaseRef.current = 0;
           autoStopRequestedRef.current = false;
+          dispatchSession({
+            type: "start",
+            sessionId: sessionIdRef.current,
+            at: Date.now(),
+          });
         }
         const perSegment = RECORDING_CHECKPOINT_SECONDS * ctx.sampleRate;
         node.onaudioprocess = (e) => {
           const data = e.inputBuffer.getChannelData(0);
           pcmRef.current.push(new Float32Array(data));
           pcmSamplesRef.current += data.length;
+          // Health tracking: čas posledních skutečných dat z mikrofonu.
+          const now = Date.now();
+          if (now - lastDataAtRef.current > 500) {
+            lastDataAtRef.current = now;
+            dispatchSession({ type: "data", at: now });
+          }
           const capturedSeconds =
             wavChunksDuration(segmentsRef.current) +
             pcmSamplesRef.current / ctx.sampleRate;
