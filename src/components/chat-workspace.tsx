@@ -35,7 +35,7 @@ import {
   fetchCloudRecordings,
   upsertCloudRecording,
   deleteCloudRecording,
-  uploadCloudAudio,
+  uploadCloudAudioChunks,
   downloadCloudAudio,
   fetchCloudGroups,
   addCloudGroup,
@@ -65,6 +65,7 @@ import {
 import { encodeWav, formatDuration } from "@/lib/wav";
 import {
   saveAudio,
+  saveSegmentedAudio,
   loadAudio,
   deleteAudio,
   saveSegment,
@@ -74,8 +75,9 @@ import {
 import {
   MAX_IMPORT_BYTES,
   MAX_RECORDING_SECONDS,
-  SEGMENT_SECONDS,
+  RECORDING_CHECKPOINT_SECONDS,
   TARGET_RATE,
+  coalesceWavChunks,
   fileToWavChunks,
   mergeWavBlobs,
   wavChunksDuration,
@@ -99,7 +101,7 @@ type Recording = {
   hasAudio?: boolean;
   audioName?: string;
   audioPath?: string;
-  stage?: "prepare" | "transcribe" | "refine" | "summary" | "translate" | undefined;
+  stage?: "prepare" | "upload" | "transcribe" | "refine" | "summary" | "translate" | undefined;
   progress?: number;
   stageDetail?: string;
   chunkCount?: number;
@@ -108,6 +110,8 @@ type Recording = {
   translationLang?: string;
   translationStatus?: "running" | "done" | "error";
   translationError?: string;
+  uploadProgress?: number;
+  uploadStatus?: "running" | "done" | "error";
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
@@ -121,6 +125,29 @@ const LANGS = [
   { value: "sk", label: "Slovenština" },
   { value: "de", label: "Němčina" },
 ];
+
+const recoverInterruptedProcessing = (recording: Recording): Recording => {
+  if (
+    recording.status !== "running" &&
+    !recording.stage &&
+    recording.refineStatus !== "running" &&
+    recording.summaryStatus !== "running" &&
+    recording.translationStatus !== "running"
+  ) {
+    return recording;
+  }
+  return {
+    ...recording,
+    status: "error",
+    stage: undefined,
+    ...(recording.refineStatus === "running" ? { refineStatus: "error" as const } : {}),
+    ...(recording.summaryStatus === "running" ? { summaryStatus: "error" as const } : {}),
+    ...(recording.translationStatus === "running"
+      ? { translationStatus: "error" as const }
+      : {}),
+    error: "Zpracování bylo přerušeno. Můžete bezpečně pokračovat tlačítkem Zkusit přepis znovu.",
+  };
+};
 
 type WakeLockSentinel = { release: () => Promise<void> };
 
@@ -158,6 +185,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const pcmRef = useRef<Float32Array[]>([]);
   const pcmSamplesRef = useRef(0);
   const flushingRef = useRef(false);
+  const flushPromiseRef = useRef<Promise<void> | null>(null);
+  const autoStopRequestedRef = useRef(false);
   const sampleRateRef = useRef(48000);
   const sessionIdRef = useRef<string | null>(null);
   const segmentsRef = useRef<Blob[]>([]);
@@ -171,7 +200,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setRecordings(JSON.parse(raw));
+      if (raw) {
+        const stored = JSON.parse(raw) as Recording[];
+        setRecordings(stored.map(recoverInterruptedProcessing));
+      }
       const rawGroups = localStorage.getItem(GROUPS_KEY);
       if (rawGroups) setGroups(JSON.parse(rawGroups));
       const activeGroup = localStorage.getItem(ACTIVE_GROUP_KEY);
@@ -286,7 +318,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         for (const rec of cloud) syncedRef.current[rec.id] = JSON.stringify(rec);
         setRecordings((prev) => {
           const map = new Map<string, Recording>();
-          for (const rec of cloud) map.set(rec.id, rec as Recording);
+          for (const rec of cloud) map.set(rec.id, recoverInterruptedProcessing(rec as Recording));
           for (const rec of prev) if (!map.has(rec.id)) map.set(rec.id, rec);
           const merged = [...map.values()].sort((a, b) => b.createdAt - a.createdAt);
           try {
@@ -351,20 +383,6 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     return () => clearTimeout(timer);
   }, [recordings, user]);
 
-  const storeAudio = useCallback(
-    async (id: string, blob: Blob, filename: string) => {
-      await saveAudio(id, blob, filename);
-      if (!user) return;
-      try {
-        const path = await uploadCloudAudio(user.id, id, blob, filename);
-        update(id, { audioPath: path });
-      } catch {
-        /* zvuk zůstane aspoň v zařízení */
-      }
-    },
-    [update, user],
-  );
-
   const getAudio = useCallback(async (rec: Recording) => {
     const local = await loadAudio(rec.id);
     if (local) return local;
@@ -408,6 +426,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       });
       const { text: refined, failed } = await processLongText("/api/refine", text, {
         payload: { language },
+        preserveInputOnFailure: true,
         onPartial: (partial) => update(id, { transcript: partial }),
         onProgress: (progress) =>
           update(id, {
@@ -602,6 +621,23 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     }
   }, []);
 
+  const queueFlush = useCallback(() => {
+    if (flushingRef.current || pcmRef.current.length === 0) return flushPromiseRef.current;
+    flushingRef.current = true;
+    const task = flushBuffer()
+      .catch(() => {
+        setBackgroundNote(
+          "Část nahrávky se nepodařilo bezpečně uložit. Nezavírejte aplikaci a nahrávku co nejdříve ukončete.",
+        );
+      })
+      .finally(() => {
+        flushingRef.current = false;
+        flushPromiseRef.current = null;
+      });
+    flushPromiseRef.current = task;
+    return task;
+  }, [flushBuffer]);
+
   const start = useCallback(
     async (resume = false) => {
       if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -627,17 +663,22 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           segmentsRef.current = [];
           setSegmentCount(0);
           elapsedBaseRef.current = 0;
+          autoStopRequestedRef.current = false;
         }
-        const perSegment = SEGMENT_SECONDS * ctx.sampleRate;
+        const perSegment = RECORDING_CHECKPOINT_SECONDS * ctx.sampleRate;
         node.onaudioprocess = (e) => {
           const data = e.inputBuffer.getChannelData(0);
           pcmRef.current.push(new Float32Array(data));
           pcmSamplesRef.current += data.length;
+          const capturedSeconds =
+            wavChunksDuration(segmentsRef.current) +
+            pcmSamplesRef.current / ctx.sampleRate;
+          if (capturedSeconds >= MAX_RECORDING_SECONDS && !autoStopRequestedRef.current) {
+            autoStopRequestedRef.current = true;
+            setElapsed(MAX_RECORDING_SECONDS);
+          }
           if (pcmSamplesRef.current >= perSegment && !flushingRef.current) {
-            flushingRef.current = true;
-            void flushBuffer().finally(() => {
-              flushingRef.current = false;
-            });
+            void queueFlush();
           }
           let peak = 0;
           for (let i = 0; i < data.length; i += 64) peak = Math.max(peak, Math.abs(data[i] ?? 0));
@@ -669,7 +710,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         }
       }
     },
-    [flushBuffer],
+    [queueFlush],
   );
 
   const stop = useCallback(async () => {
@@ -680,6 +721,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     streamRef.current = null;
     nodeRef.current?.disconnect();
     nodeRef.current = null;
+    await flushPromiseRef.current;
     await flushBuffer();
     await ctx?.close();
     ctxRef.current = null;
@@ -731,6 +773,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         setBackgroundNote(
           "Nahrávání pokračuje na pozadí, pokud to zařízení a prohlížeč dovolí. Po návratu se stav obnoví a uložené části se neztratí.",
         );
+        void queueFlush();
         return;
       }
       void ctxRef.current?.resume();
@@ -742,20 +785,26 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       }
     };
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      void queueFlush();
       event.preventDefault();
       event.returnValue = "";
     };
+    const onPageHide = () => {
+      void queueFlush();
+    };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onPageHide);
       if (!released) {
         released = true;
         void lock?.release().catch(() => {});
       }
     };
-  }, [isRecording]);
+  }, [isRecording, queueFlush]);
 
   // Po pádu, restartu nebo zavření aplikace najdeme rozpracovanou nahrávku.
   useEffect(() => {
@@ -795,7 +844,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     if (!held) return;
     pendingRef.current = null;
     setPending(null);
-    const chunks = [...held.segments];
+    const storedSegments = [...held.segments];
+    const chunks = coalesceWavChunks(storedSegments);
     const merged = mergeWavBlobs(chunks);
     const group = recordingGroup !== "none" ? recordingGroup : "";
     const id = crypto.randomUUID();
@@ -814,7 +864,20 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       group,
     };
     persist([entry, ...recordings]);
-    void storeAudio(id, merged, filename);
+    void saveSegmentedAudio(id, held.session, filename).catch(() => {
+      void saveAudio(id, merged, filename);
+    });
+    if (user) {
+      update(id, { uploadStatus: "running", uploadProgress: 0 });
+      void uploadCloudAudioChunks(user.id, id, chunks, (done, total) => {
+        update(id, { uploadProgress: Math.round((done / total) * 100) });
+      })
+        .then((audioPath) => update(id, { audioPath, uploadStatus: "done", uploadProgress: 100 }))
+        .catch(() => {
+          update(id, { uploadStatus: "error" });
+          toast.error("Zvuk zůstal bezpečně v tomto zařízení, ale cloudové uložení se přerušilo.");
+        });
+    }
     void runPipeline(id, chunks, language);
     segmentsRef.current = [];
     sessionIdRef.current = null;
@@ -823,14 +886,14 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     elapsedRef.current = 0;
     setElapsed(0);
     setBackgroundNote(null);
-    void deleteSegments(held.session);
+    autoStopRequestedRef.current = false;
     try {
       localStorage.removeItem(DRAFT_KEY);
     } catch {
       /* ignore */
     }
     toast.success(group ? `Uloženo do složky „${group}“.` : "Uloženo mezi nahrávky bez složky.");
-  }, [language, persist, recordingGroup, recordings, runPipeline, storeAudio]);
+  }, [language, persist, recordingGroup, recordings, runPipeline, update, user]);
 
   const continuePending = useCallback(() => {
     const held = pendingRef.current;
@@ -912,8 +975,6 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         }
         return next;
       });
-      void storeAudio(id, file, file.name);
-
       // Dlouhý soubor rozdělíme na segmenty, aby se přepis nezasekl na velikosti.
       let chunks: Blob[] = [];
       try {
@@ -924,9 +985,23 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       if (!duration) {
         update(id, { duration: wavChunksDuration(chunks) });
       }
+      void saveAudio(id, file, file.name);
+      if (user) {
+        update(id, { uploadStatus: "running", uploadProgress: 0 });
+        void uploadCloudAudioChunks(user.id, id, chunks, (done, total) => {
+          update(id, { uploadProgress: Math.round((done / total) * 100) });
+        })
+          .then((audioPath) =>
+            update(id, { audioPath, uploadStatus: "done", uploadProgress: 100 }),
+          )
+          .catch(() => {
+            update(id, { uploadStatus: "error" });
+            toast.error("Zvuk zůstal v tomto zařízení, ale cloudové uložení se přerušilo.");
+          });
+      }
       void runPipeline(id, chunks, language);
     },
-    [language, recordingGroup, runPipeline, storeAudio, update],
+    [language, recordingGroup, runPipeline, update, user],
   );
 
   const remove = (id: string) => {
@@ -1282,7 +1357,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                           const label =
                             stage === "prepare"
                               ? "Připravuji zvuk…"
-                              : stage === "transcribe"
+                                : stage === "upload"
+                                  ? "Ukládám zvuk do cloudu…"
+                                : stage === "transcribe"
                                 ? "Přepisuji zvuk…"
                                 : stage === "refine"
                                   ? "Upravuji češtinu…"

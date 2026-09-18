@@ -2,6 +2,8 @@ import { encodeWav } from "./wav";
 
 /** Délka jednoho bezpečného segmentu nahrávky v sekundách. */
 export const SEGMENT_SECONDS = 240;
+/** Jak často se živá nahrávka bezpečně odloží do IndexedDB. */
+export const RECORDING_CHECKPOINT_SECONDS = 30;
 /** Vzorkovací frekvence, se kterou pracuje přepis (16 kHz mono = nejlepší poměr kvalita/velikost). */
 export const TARGET_RATE = 16000;
 /** Maximální délka jedné nahrávky – 2 hodiny. */
@@ -46,6 +48,35 @@ export function mergeWavBlobs(blobs: Blob[], sampleRate = TARGET_RATE): Blob {
     parts.push(blob.slice(HEADER_BYTES));
   }
   return new Blob([wavHeader(dataBytes, sampleRate), ...parts], { type: "audio/wav" });
+}
+
+/**
+ * Sloučí malé záchranné segmenty do částí vhodných pro přepis a upload.
+ * Pracuje jen s Blob výřezy, takže nekopíruje celý zvuk do paměti.
+ */
+export function coalesceWavChunks(
+  blobs: Blob[],
+  seconds = SEGMENT_SECONDS,
+  sampleRate = TARGET_RATE,
+): Blob[] {
+  const maxDataBytes = seconds * sampleRate * 2;
+  const groups: Blob[][] = [];
+  let group: Blob[] = [];
+  let groupBytes = 0;
+  for (const blob of blobs) {
+    const dataBytes = Math.max(0, blob.size - HEADER_BYTES);
+    if (group.length > 0 && groupBytes + dataBytes > maxDataBytes) {
+      groups.push(group);
+      group = [];
+      groupBytes = 0;
+    }
+    if (dataBytes > 0) {
+      group.push(blob);
+      groupBytes += dataBytes;
+    }
+  }
+  if (group.length > 0) groups.push(group);
+  return groups.map((items) => mergeWavBlobs(items, sampleRate));
 }
 
 /** Rozdělí PCM data na WAV segmenty o dané délce. */

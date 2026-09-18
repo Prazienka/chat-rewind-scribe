@@ -30,6 +30,12 @@ export const uploadCloudAudio = async (
   blob: Blob,
   filename: string,
 ) => (await cloud()).uploadCloudAudio(userId, id, blob, filename);
+export const uploadCloudAudioChunks = async (
+  userId: string,
+  id: string,
+  chunks: Blob[],
+  onProgress?: (done: number, total: number) => void,
+) => (await cloud()).uploadCloudAudioChunks(userId, id, chunks, onProgress);
 export const downloadCloudAudio = async (path: string) =>
   (await cloud()).downloadCloudAudio(path);
 export const fetchCloudGroups = async () => (await cloud()).fetchCloudGroups();

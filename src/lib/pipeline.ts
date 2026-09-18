@@ -11,6 +11,8 @@ export type StageProgress = {
 
 const MAX_ATTEMPTS = 3;
 const TEXT_CHUNK_CHARS = 8000;
+const TRANSCRIBE_TIMEOUT_MS = 90_000;
+const TEXT_TIMEOUT_MS = 75_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -59,15 +61,22 @@ async function transcribeChunk(
 ): Promise<{ text: string; error?: string }> {
   let lastError = "Přepis části se nepodařil.";
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS);
     try {
       const body = new FormData();
       body.append("file", chunk, `cast-${index + 1}.wav`);
       body.append("language", language);
-      const response = await fetch("/api/transcribe", { method: "POST", body });
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        body,
+        signal: controller.signal,
+      });
       if (!response.ok || !response.body) {
         lastError = await errorMessage(response, lastError);
         // Chyby vstupu nemá smysl opakovat.
         if (response.status === 400 || response.status === 413) break;
+        clearTimeout(timeout);
         await sleep(attempt * 1500);
         continue;
       }
@@ -76,11 +85,15 @@ async function transcribeChunk(
         if (event.type === "transcript.text.delta" && event.delta) text += event.delta;
         else if (event.type === "transcript.text.done") text = event.text ?? text;
       });
-      return { text: text.trim() };
+      clearTimeout(timeout);
+      if (text.trim()) return { text: text.trim() };
+      lastError = "Přepis části nevrátil žádný text.";
     } catch {
-      lastError = "Spojení se přerušilo.";
-      await sleep(attempt * 1500);
+      lastError = "Spojení se přerušilo nebo vypršel časový limit.";
+    } finally {
+      clearTimeout(timeout);
     }
+    if (attempt < MAX_ATTEMPTS) await sleep(attempt * 1500);
   }
   return { text: "", error: lastError };
 }
@@ -164,6 +177,7 @@ export async function processLongText(
   options: {
     payload?: Record<string, unknown>;
     limit?: number;
+    preserveInputOnFailure?: boolean;
     onPartial?: (text: string) => void;
     onProgress?: (progress: StageProgress) => void;
   } = {},
@@ -179,14 +193,18 @@ export async function processLongText(
     let ok = false;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
       output = "";
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), TEXT_TIMEOUT_MS);
       try {
         const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...options.payload, text: part }),
+          signal: controller.signal,
         });
         if (!response.ok || !response.body) {
           if (response.status === 400) break;
+          clearTimeout(timeout);
           await sleep(attempt * 1500);
           continue;
         }
@@ -199,13 +217,19 @@ export async function processLongText(
         ok = output.trim().length > 0;
         if (!ok) await sleep(attempt * 1000);
       } catch {
-        await sleep(attempt * 1500);
+        if (attempt < MAX_ATTEMPTS) await sleep(attempt * 1500);
+      } finally {
+        clearTimeout(timeout);
       }
     }
     if (ok) done.push(output.trim());
     else {
       failed++;
-      done.push(part);
+      done.push(
+        options.preserveInputOnFailure
+          ? part
+          : `[část ${index + 1} se nepodařilo zpracovat]`,
+      );
     }
     options.onPartial?.(done.join("\n\n"));
     options.onProgress?.({
