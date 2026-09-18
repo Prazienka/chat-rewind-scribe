@@ -197,6 +197,16 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const pendingRef = useRef<{ session: string; segments: Blob[]; seconds: number } | null>(null);
   const audioUrlsRef = useRef<Record<string, string>>({});
 
+  // Mikrofon uvolníme teprve při odchodu ze stránky, ne po dokončení nahrávky.
+  useEffect(
+    () => () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    },
+    [],
+  );
+
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
