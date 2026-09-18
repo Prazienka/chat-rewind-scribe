@@ -1496,7 +1496,6 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                   {isRecording ? <Square className="size-5" aria-hidden="true" /> : <Mic className="size-5" aria-hidden="true" />}
                   {isRecording ? "Zastavit nahrávání" : "Spustit nahrávání"}
               </Button>
-            </div>
               <p className="mt-5 font-display text-4xl font-bold tabular-nums text-foreground" aria-live="off">
               {formatDuration(elapsed)}
               </p>
@@ -1686,7 +1685,6 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                 </span>
               ))}
               <Button variant={filter === "none" ? "default" : "outline"} className="min-h-11 shrink-0" onClick={() => setFilter("none")}>Bez složky</Button>
-          </div>
           </div>
 
           <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
