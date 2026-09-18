@@ -187,6 +187,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const flushingRef = useRef(false);
   const flushPromiseRef = useRef<Promise<void> | null>(null);
   const autoStopRequestedRef = useRef(false);
+  const startingRef = useRef(false);
+  const recoveringRef = useRef(false);
   const sampleRateRef = useRef(48000);
   const sessionIdRef = useRef<string | null>(null);
   const segmentsRef = useRef<Blob[]>([]);
