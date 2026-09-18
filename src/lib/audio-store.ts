@@ -1,12 +1,14 @@
 const DB_NAME = "zapisnik";
 const STORE = "audio";
+const SEGMENTS = "segments";
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(DB_NAME, 2);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if (!db.objectStoreNames.contains(SEGMENTS)) db.createObjectStore(SEGMENTS);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -52,6 +54,60 @@ export async function deleteAudio(id: string): Promise<void> {
     await new Promise<void>((resolve) => {
       const tx = db.transaction(STORE, "readwrite");
       tx.objectStore(STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+    db.close();
+  } catch {
+    /* ignore */
+  }
+}
+
+/* ---- Segmenty probíhající nahrávky ----------------------------------------
+   Nahrávka se ukládá po částech, takže se při zamrznutí, vybité baterii nebo
+   zavření aplikace neztratí to, co už je hotové. */
+
+const segmentKey = (session: string, index: number) => `${session}:${String(index).padStart(5, "0")}`;
+
+export async function saveSegment(session: string, index: number, blob: Blob): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(SEGMENTS, "readwrite");
+      tx.objectStore(SEGMENTS).put(blob, segmentKey(session, index));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    /* ignore – segment zůstane aspoň v paměti */
+  }
+}
+
+export async function loadSegments(session: string): Promise<Blob[]> {
+  try {
+    const db = await openDb();
+    const result = await new Promise<Blob[]>((resolve) => {
+      const tx = db.transaction(SEGMENTS, "readonly");
+      const store = tx.objectStore(SEGMENTS);
+      const range = IDBKeyRange.bound(`${session}:`, `${session}:\uffff`);
+      const req = store.getAll(range);
+      req.onsuccess = () => resolve((req.result as Blob[] | undefined) ?? []);
+      req.onerror = () => resolve([]);
+    });
+    db.close();
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteSegments(session: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(SEGMENTS, "readwrite");
+      tx.objectStore(SEGMENTS).delete(IDBKeyRange.bound(`${session}:`, `${session}:\uffff`));
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });

@@ -24,6 +24,9 @@ import {
   AlertCircle,
   FileText,
   Trash2,
+  Languages,
+  RotateCcw,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -60,7 +63,24 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { encodeWav, formatDuration } from "@/lib/wav";
-import { saveAudio, loadAudio, deleteAudio } from "@/lib/audio-store";
+import {
+  saveAudio,
+  loadAudio,
+  deleteAudio,
+  saveSegment,
+  loadSegments,
+  deleteSegments,
+} from "@/lib/audio-store";
+import {
+  MAX_IMPORT_BYTES,
+  MAX_RECORDING_SECONDS,
+  SEGMENT_SECONDS,
+  TARGET_RATE,
+  fileToWavChunks,
+  mergeWavBlobs,
+  wavChunksDuration,
+} from "@/lib/audio-chunks";
+import { processLongText, transcribeChunks } from "@/lib/pipeline";
 
 type Recording = {
   id: string;
@@ -79,11 +99,21 @@ type Recording = {
   hasAudio?: boolean;
   audioName?: string;
   audioPath?: string;
+  stage?: "prepare" | "transcribe" | "refine" | "summary" | "translate" | undefined;
+  progress?: number;
+  stageDetail?: string;
+  chunkCount?: number;
+  failedChunks?: number;
+  translation?: string;
+  translationLang?: string;
+  translationStatus?: "running" | "done" | "error";
+  translationError?: string;
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
 const GROUPS_KEY = "zapisnik.groups";
 const ACTIVE_GROUP_KEY = "zapisnik.active-group";
+const DRAFT_KEY = "zapisnik.draft";
 const LANGS = [
   { value: "cs", label: "Čeština" },
   { value: "auto", label: "Automaticky" },
@@ -91,6 +121,8 @@ const LANGS = [
   { value: "sk", label: "Slovenština" },
   { value: "de", label: "Němčina" },
 ];
+
+type WakeLockSentinel = { release: () => Promise<void> };
 
 type ChatWorkspaceProps = {
   mode: "recorder" | "library";
@@ -112,18 +144,28 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [pending, setPending] = useState<{ duration: number } | null>(null);
+  const [pending, setPending] = useState<
+    { duration: number; segments: number; recovered?: boolean } | null
+  >(null);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [segmentCount, setSegmentCount] = useState(0);
+  const [backgroundNote, setBackgroundNote] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const nodeRef = useRef<ScriptProcessorNode | null>(null);
   const pcmRef = useRef<Float32Array[]>([]);
+  const pcmSamplesRef = useRef(0);
+  const flushingRef = useRef(false);
+  const sampleRateRef = useRef(48000);
+  const sessionIdRef = useRef<string | null>(null);
+  const segmentsRef = useRef<Blob[]>([]);
+  const elapsedRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const syncedRef = useRef<Record<string, string>>({});
   const elapsedBaseRef = useRef(0);
-  const pendingRef = useRef<{ chunks: Float32Array[]; sampleRate: number } | null>(null);
+  const pendingRef = useRef<{ session: string; segments: Blob[]; seconds: number } | null>(null);
   const audioUrlsRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
@@ -283,6 +325,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     const timer = setTimeout(() => {
       for (const rec of recordings) {
         if (rec.status === "running" || rec.summaryStatus === "running") continue;
+        if (rec.stage || rec.translationStatus === "running") continue;
         const snapshot = JSON.stringify({
           id: rec.id,
           createdAt: rec.createdAt,
@@ -292,6 +335,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           title: rec.title ?? "",
           rawTranscript: rec.rawTranscript ?? "",
           summary: rec.summary ?? "",
+          translation: rec.translation ?? "",
+          translationLang: rec.translationLang ?? "",
           group: rec.group ?? "",
           audioName: rec.audioName ?? "",
           audioPath: rec.audioPath ?? "",
@@ -335,7 +380,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     if (!isRecording) return;
     const started = Date.now();
     const base = elapsedBaseRef.current;
-    const timer = setInterval(() => setElapsed(base + (Date.now() - started) / 1000), 250);
+    const timer = setInterval(() => {
+      const value = base + (Date.now() - started) / 1000;
+      elapsedRef.current = value;
+      setElapsed(value);
+    }, 250);
     return () => clearInterval(timer);
   }, [isRecording]);
 
@@ -347,308 +396,478 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Dlouhý přepis posíláme na korekturu po částech a spojíme zpět v původním pořadí.
   const refine = useCallback(
     async (text: string, id: string): Promise<string> => {
-      update(id, { rawTranscript: text, refineStatus: "running" });
-      try {
-        const res = await fetch("/api/refine", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, language }),
-        });
-        if (!res.ok || !res.body) {
-          update(id, { refineStatus: "error" });
-          return text;
-        }
-        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = "";
-        let refined = "";
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += value;
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const event = JSON.parse(payload) as { type?: string; delta?: string };
-              if (event.type === "response.output_text.delta" && event.delta) {
-                refined += event.delta;
-                update(id, { transcript: refined });
-              }
-            } catch {
-              /* ignore malformed event */
-            }
-          }
-        }
-        if (refined.trim().length < Math.min(20, text.length / 4)) {
-          update(id, { transcript: text, refineStatus: "error" });
-          return text;
-        }
-        update(id, { transcript: refined.trim(), refineStatus: "done" });
-        return refined.trim();
-      } catch (err) {
-        console.error(err);
+      update(id, {
+        rawTranscript: text,
+        refineStatus: "running",
+        stage: "refine",
+        progress: 0,
+        stageDetail: "",
+      });
+      const { text: refined, failed } = await processLongText("/api/refine", text, {
+        payload: { language },
+        onPartial: (partial) => update(id, { transcript: partial }),
+        onProgress: (progress) =>
+          update(id, {
+            progress: progress.percent,
+            stageDetail: progress.total > 1 ? `${progress.done}/${progress.total}` : "",
+          }),
+      });
+      if (!refined.trim()) {
         update(id, { transcript: text, refineStatus: "error" });
         return text;
       }
+      update(id, { transcript: refined, refineStatus: failed > 0 ? "error" : "done" });
+      return refined;
     },
     [language, update],
   );
 
   const summarize = useCallback(
     async (text: string, id: string) => {
-      update(id, { summaryStatus: "running", summary: "", summaryError: "" });
-      try {
-        const res = await fetch("/api/summarize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
+      if (!text.trim()) return;
+      update(id, {
+        summaryStatus: "running",
+        summary: "",
+        summaryError: "",
+        stage: "summary",
+        progress: 0,
+        stageDetail: "",
+      });
+      const { text: summary, failed } = await processLongText("/api/summarize", text, {
+        limit: 12000,
+        onPartial: (partial) => update(id, { summary: partial }),
+        onProgress: (progress) =>
+          update(id, {
+            progress: progress.percent,
+            stageDetail: progress.total > 1 ? `${progress.done}/${progress.total}` : "",
+          }),
+      });
+      if (!summary.trim() || failed > 0) {
+        update(id, {
+          summaryStatus: "error",
+          summaryError: "Shrnutí se nepodařilo dokončit. Zkuste ho vytvořit znovu.",
+          stage: undefined,
         });
-        if (!res.ok || !res.body) {
-          let message = "Shrnutí se nepodařilo.";
-          try {
-            const data = (await res.json()) as { error?: string };
-            if (data?.error) message = data.error;
-          } catch {
-            /* ignore */
-          }
-          update(id, { summaryStatus: "error", summaryError: message });
-          return;
-        }
-
-        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = "";
-        let summary = "";
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += value;
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const event = JSON.parse(payload) as { type?: string; delta?: string };
-              if (event.type === "response.output_text.delta" && event.delta) {
-                summary += event.delta;
-                update(id, { summary });
-              }
-            } catch {
-              /* ignore malformed event */
-            }
-          }
-        }
-        if (summary.trim().length === 0) {
-          update(id, { summaryStatus: "error", summaryError: "Shrnutí se nepodařilo vytvořit." });
-        } else {
-          update(id, { summary, summaryStatus: "done" });
-        }
-      } catch (err) {
-        console.error(err);
-        update(id, { summaryStatus: "error", summaryError: "Spojení se přerušilo." });
+        return;
       }
+      update(id, { summary, summaryStatus: "done", stage: undefined, progress: 100 });
     },
     [update],
   );
 
-  const transcribe = useCallback(
-    async (blob: Blob, id: string, filename = "recording.wav") => {
-      const body = new FormData();
-      body.append("file", blob, filename);
-      body.append("language", language);
-
-
-      try {
-        const res = await fetch("/api/transcribe", { method: "POST", body });
-        if (!res.ok || !res.body) {
-          let message = "Přepis se nepodařil.";
-          try {
-            const data = (await res.json()) as { error?: string };
-            if (data?.error) message = data.error;
-          } catch {
-            /* ignore */
-          }
-          update(id, { status: "error", error: message });
-          toast.error(message);
-          return;
-        }
-
-        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = "";
-        let text = "";
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += value;
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const event = JSON.parse(payload) as {
-                type: string;
-                delta?: string;
-                text?: string;
-              };
-              if (event.type === "transcript.text.delta" && event.delta) {
-                text += event.delta;
-                update(id, { transcript: text });
-              } else if (event.type === "transcript.text.done") {
-                text = event.text ?? text;
-                update(id, { transcript: text, status: "done" });
-              }
-            } catch {
-              /* ignore malformed event */
-            }
-          }
-        }
-        if (text.trim().length === 0) {
-          update(id, { status: "error", error: "V nahrávce nebyla rozpoznána žádná řeč." });
-        } else {
-          update(id, { transcript: text, status: "done" });
-          const refined = await refine(text, id);
-          void summarize(refined, id);
-        }
-      } catch (err) {
-        console.error(err);
-        update(id, { status: "error", error: "Spojení se přerušilo." });
-        toast.error("Spojení se přerušilo.");
+  const translate = useCallback(
+    async (rec: Recording, target: string) => {
+      if (!rec.transcript.trim()) {
+        toast.error("Nejdřív je potřeba hotový přepis.");
+        return;
       }
+      update(rec.id, {
+        translationStatus: "running",
+        translation: "",
+        translationLang: target,
+        translationError: "",
+        stage: "translate",
+        progress: 0,
+        stageDetail: "",
+      });
+      const { text, failed } = await processLongText("/api/translate", rec.transcript, {
+        payload: { target },
+        onPartial: (partial) => update(rec.id, { translation: partial }),
+        onProgress: (progress) =>
+          update(rec.id, {
+            progress: progress.percent,
+            stageDetail: progress.total > 1 ? `${progress.done}/${progress.total}` : "",
+          }),
+      });
+      if (!text.trim()) {
+        update(rec.id, {
+          translationStatus: "error",
+          translationError: "Překlad se nepodařil. Zkuste to prosím znovu.",
+          stage: undefined,
+        });
+        return;
+      }
+      update(rec.id, {
+        translation: text,
+        translationStatus: failed > 0 ? "error" : "done",
+        ...(failed > 0
+          ? { translationError: `${failed} část(i) se nepodařilo přeložit – zkuste to znovu.` }
+          : {}),
+        stage: undefined,
+        progress: 100,
+      });
     },
-    [language, refine, summarize, update],
+    [update],
   );
 
-  const start = useCallback(async (resume = false) => {
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      toast.error("Tento prohlížeč nahrávání nepodporuje. Zkuste Chrome nebo Safari.");
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-      streamRef.current = stream;
-      const ctx = new AudioContext();
-      ctxRef.current = ctx;
-      if (ctx.state === "suspended") await ctx.resume();
-      const source = ctx.createMediaStreamSource(stream);
-      const node = ctx.createScriptProcessor(4096, 1, 1);
-      nodeRef.current = node;
-      pcmRef.current = resume ? (pendingRef.current?.chunks ?? []) : [];
-      node.onaudioprocess = (e) => {
-        const data = e.inputBuffer.getChannelData(0);
-        pcmRef.current.push(new Float32Array(data));
-        let peak = 0;
-        for (let i = 0; i < data.length; i += 64) peak = Math.max(peak, Math.abs(data[i] ?? 0));
-        setLevel(peak);
-      };
-      source.connect(node);
-      node.connect(ctx.destination);
-      if (!resume) elapsedBaseRef.current = 0;
-      setElapsed(elapsedBaseRef.current);
-      setIsRecording(true);
-    } catch (err) {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      const name = (err as { name?: string })?.name ?? "";
-      const inFrame = typeof window !== "undefined" && window.self !== window.top;
-      if (name === "NotAllowedError" || name === "SecurityError") {
-        toast.error(
-          inFrame
-            ? "Prohlížeč tu mikrofon nepovolil. Otevřete aplikaci v samostatné záložce a povolte mikrofon."
-            : "Mikrofon je zakázaný. Povolte ho v nastavení prohlížeče u této stránky a zkuste to znovu.",
-          { duration: 8000 },
-        );
-      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
-        toast.error("Nenašel jsem žádný mikrofon. Připojte ho a zkuste to znovu.");
-      } else if (name === "NotReadableError") {
-        toast.error("Mikrofon právě používá jiná aplikace. Zavřete ji a zkuste to znovu.");
-      } else {
-        toast.error("Nepodařilo se získat přístup k mikrofonu.");
+  // Hlavní zpracování: segmenty → přepis → česká korektura → shrnutí.
+  const runPipeline = useCallback(
+    async (id: string, chunks: Blob[], lang: string) => {
+      if (chunks.length === 0) {
+        update(id, { status: "error", error: "Nahrávka neobsahuje žádný zvuk." });
+        return;
       }
+      update(id, {
+        status: "running",
+        error: "",
+        stage: "transcribe",
+        progress: 0,
+        chunkCount: chunks.length,
+        failedChunks: 0,
+        stageDetail: chunks.length > 1 ? `0/${chunks.length}` : "",
+      });
+      const result = await transcribeChunks(chunks, lang, {
+        onPartial: (text) => update(id, { transcript: text }),
+        onProgress: (progress) =>
+          update(id, {
+            progress: progress.percent,
+            stageDetail: progress.total > 1 ? `${progress.done}/${progress.total}` : "",
+          }),
+      });
+      if (!result.text.trim()) {
+        update(id, {
+          status: "error",
+          stage: undefined,
+          error: "V nahrávce nebyla rozpoznána žádná řeč nebo se přepis nepodařil.",
+        });
+        return;
+      }
+      update(id, {
+        transcript: result.text,
+        status: "done",
+        failedChunks: result.failed.length,
+      });
+      if (result.failed.length > 0) {
+        toast.error(
+          `${result.failed.length} část se nepodařilo přepsat. V detailu můžete zpracování zkusit znovu.`,
+          { duration: 10000 },
+        );
+      }
+      const refined = await refine(result.text, id);
+      await summarize(refined, id);
+    },
+    [refine, summarize, update],
+  );
+
+  // Opakování celého zpracování ze uloženého zvuku (po chybě nebo chybějící části).
+  const retry = useCallback(
+    async (rec: Recording) => {
+      update(rec.id, { status: "running", error: "", stage: "prepare", progress: 0 });
+      const stored = await getAudio(rec);
+      if (!stored) {
+        update(rec.id, {
+          status: "error",
+          stage: undefined,
+          error: "Zvukový záznam už není k dispozici, přepis nelze zopakovat.",
+        });
+        return;
+      }
+      try {
+        const chunks = await fileToWavChunks(stored.blob);
+        await runPipeline(rec.id, chunks, language);
+      } catch {
+        update(rec.id, {
+          status: "error",
+          stage: undefined,
+          error: "Zvuk se nepodařilo připravit k přepisu.",
+        });
+      }
+    },
+    [getAudio, language, runPipeline, update],
+  );
+
+  /** Uloží nasbíraný zvuk jako další bezpečný segment a uvolní paměť. */
+  const flushBuffer = useCallback(async () => {
+    const buffer = pcmRef.current;
+    pcmRef.current = [];
+    pcmSamplesRef.current = 0;
+    if (buffer.length === 0) return;
+    const blob = encodeWav(buffer, sampleRateRef.current, TARGET_RATE);
+    const index = segmentsRef.current.length;
+    segmentsRef.current.push(blob);
+    setSegmentCount(segmentsRef.current.length);
+    const session = sessionIdRef.current;
+    if (!session) return;
+    await saveSegment(session, index, blob);
+    try {
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({ session, seconds: elapsedRef.current, segments: index + 1 }),
+      );
+    } catch {
+      /* ignore */
     }
   }, []);
 
+  const start = useCallback(
+    async (resume = false) => {
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        toast.error("Tento prohlížeč nahrávání nepodporuje. Zkuste Chrome nebo Safari.");
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        streamRef.current = stream;
+        const ctx = new AudioContext();
+        ctxRef.current = ctx;
+        if (ctx.state === "suspended") await ctx.resume();
+        sampleRateRef.current = ctx.sampleRate;
+        const source = ctx.createMediaStreamSource(stream);
+        const node = ctx.createScriptProcessor(4096, 1, 1);
+        nodeRef.current = node;
+        pcmRef.current = [];
+        pcmSamplesRef.current = 0;
+        if (!resume) {
+          sessionIdRef.current = crypto.randomUUID();
+          segmentsRef.current = [];
+          setSegmentCount(0);
+          elapsedBaseRef.current = 0;
+        }
+        const perSegment = SEGMENT_SECONDS * ctx.sampleRate;
+        node.onaudioprocess = (e) => {
+          const data = e.inputBuffer.getChannelData(0);
+          pcmRef.current.push(new Float32Array(data));
+          pcmSamplesRef.current += data.length;
+          if (pcmSamplesRef.current >= perSegment && !flushingRef.current) {
+            flushingRef.current = true;
+            void flushBuffer().finally(() => {
+              flushingRef.current = false;
+            });
+          }
+          let peak = 0;
+          for (let i = 0; i < data.length; i += 64) peak = Math.max(peak, Math.abs(data[i] ?? 0));
+          setLevel(peak);
+        };
+        source.connect(node);
+        node.connect(ctx.destination);
+        elapsedRef.current = elapsedBaseRef.current;
+        setElapsed(elapsedBaseRef.current);
+        setIsRecording(true);
+      } catch (err) {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        const name = (err as { name?: string })?.name ?? "";
+        const inFrame = typeof window !== "undefined" && window.self !== window.top;
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          toast.error(
+            inFrame
+              ? "Prohlížeč tu mikrofon nepovolil. Otevřete aplikaci v samostatné záložce a povolte mikrofon."
+              : "Mikrofon je zakázaný. Povolte ho v nastavení prohlížeče u této stránky a zkuste to znovu.",
+            { duration: 8000 },
+          );
+        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+          toast.error("Nenašel jsem žádný mikrofon. Připojte ho a zkuste to znovu.");
+        } else if (name === "NotReadableError") {
+          toast.error("Mikrofon právě používá jiná aplikace. Zavřete ji a zkuste to znovu.");
+        } else {
+          toast.error("Nepodařilo se získat přístup k mikrofonu.");
+        }
+      }
+    },
+    [flushBuffer],
+  );
 
   const stop = useCallback(async () => {
     setIsRecording(false);
     setLevel(0);
     const ctx = ctxRef.current;
     streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
     nodeRef.current?.disconnect();
     nodeRef.current = null;
-    const sampleRate = ctx?.sampleRate ?? 48000;
-    const chunks = pcmRef.current;
-    pcmRef.current = [];
+    await flushBuffer();
     await ctx?.close();
     ctxRef.current = null;
 
-    const total = chunks.reduce((sum, c) => sum + c.length, 0);
-    if (total / sampleRate < 0.3) {
+    const segments = segmentsRef.current;
+    const seconds = Math.max(elapsedRef.current, wavChunksDuration(segments));
+    if (segments.length === 0 || seconds < 0.3) {
       toast.error("Nahrávka byla prázdná – zkuste to prosím znovu.");
       elapsedBaseRef.current = 0;
+      elapsedRef.current = 0;
       setElapsed(0);
       return;
     }
 
-    pendingRef.current = { chunks, sampleRate };
-    elapsedBaseRef.current = elapsed;
-    setPending({ duration: elapsed });
-  }, [elapsed]);
+    const session = sessionIdRef.current ?? crypto.randomUUID();
+    pendingRef.current = { session, segments, seconds };
+    elapsedBaseRef.current = seconds;
+    setPending({ duration: seconds, segments: segments.length });
+  }, [flushBuffer]);
+
+  // Nahrávka se automaticky zastaví na dvou hodinách, aby se stihla bezpečně uložit.
+  useEffect(() => {
+    if (!isRecording || elapsed < MAX_RECORDING_SECONDS) return;
+    toast.error("Dosáhli jste maximální délky 2 hodin. Nahrávku jsem zastavil a uložil.");
+    void stop();
+  }, [elapsed, isRecording, stop]);
+
+  // Na mobilu se snažíme udržet nahrávání i při přepnutí aplikace do pozadí.
+  // Prohlížeč to negarantuje, proto při návratu vždy obnovíme zvukový kontext.
+  useEffect(() => {
+    if (!isRecording) return;
+    let lock: WakeLockSentinel | null = null;
+    let released = false;
+    const requestLock = async () => {
+      try {
+        const api = (navigator as unknown as {
+          wakeLock?: { request: (type: string) => Promise<WakeLockSentinel> };
+        }).wakeLock;
+        if (!api) return;
+        lock = await api.request("screen");
+      } catch {
+        /* zařízení wake lock nepovoluje */
+      }
+    };
+    void requestLock();
+
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") {
+        setBackgroundNote(
+          "Nahrávání pokračuje na pozadí, pokud to zařízení a prohlížeč dovolí. Po návratu se stav obnoví a uložené části se neztratí.",
+        );
+        return;
+      }
+      void ctxRef.current?.resume();
+      void requestLock();
+      if (ctxRef.current?.state !== "running") {
+        setBackgroundNote(
+          "Prohlížeč nahrávání na pozadí pozastavil. Už uložené části zůstaly zachovány – pokračujte nahráváním, nebo nahrávku uložte.",
+        );
+      }
+    };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      if (!released) {
+        released = true;
+        void lock?.release().catch(() => {});
+      }
+    };
+  }, [isRecording]);
+
+  // Po pádu, restartu nebo zavření aplikace najdeme rozpracovanou nahrávku.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        const draft = JSON.parse(raw) as { session?: string; seconds?: number };
+        if (!draft.session) return;
+        const segments = await loadSegments(draft.session);
+        if (cancelled) return;
+        if (segments.length === 0) {
+          localStorage.removeItem(DRAFT_KEY);
+          return;
+        }
+        const seconds = draft.seconds || wavChunksDuration(segments);
+        pendingRef.current = { session: draft.session, segments, seconds };
+        segmentsRef.current = segments;
+        sessionIdRef.current = draft.session;
+        setSegmentCount(segments.length);
+        elapsedBaseRef.current = seconds;
+        elapsedRef.current = seconds;
+        setElapsed(seconds);
+        setPending({ duration: seconds, segments: segments.length, recovered: true });
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const savePending = useCallback(() => {
     const held = pendingRef.current;
     if (!held) return;
     pendingRef.current = null;
     setPending(null);
-    const blob = encodeWav(held.chunks, held.sampleRate);
+    const chunks = [...held.segments];
+    const merged = mergeWavBlobs(chunks);
     const group = recordingGroup !== "none" ? recordingGroup : "";
     const id = crypto.randomUUID();
     const filename = `nahravka-${new Date().toISOString().slice(0, 16).replace(":", "-")}.wav`;
     const entry: Recording = {
       id,
       createdAt: Date.now(),
-      duration: elapsedBaseRef.current,
+      duration: held.seconds,
       transcript: "",
       status: "running",
+      stage: "transcribe",
+      progress: 0,
+      chunkCount: chunks.length,
       hasAudio: true,
       audioName: filename,
       group,
     };
     persist([entry, ...recordings]);
-    void storeAudio(id, blob, filename);
-    void transcribe(blob, id);
+    void storeAudio(id, merged, filename);
+    void runPipeline(id, chunks, language);
+    segmentsRef.current = [];
+    sessionIdRef.current = null;
+    setSegmentCount(0);
     elapsedBaseRef.current = 0;
+    elapsedRef.current = 0;
     setElapsed(0);
+    setBackgroundNote(null);
+    void deleteSegments(held.session);
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* ignore */
+    }
     toast.success(group ? `Uloženo do složky „${group}“.` : "Uloženo mezi nahrávky bez složky.");
-  }, [persist, recordingGroup, recordings, storeAudio, transcribe]);
+  }, [language, persist, recordingGroup, recordings, runPipeline, storeAudio]);
 
   const continuePending = useCallback(() => {
+    const held = pendingRef.current;
+    if (held) {
+      segmentsRef.current = held.segments;
+      sessionIdRef.current = held.session;
+      setSegmentCount(held.segments.length);
+      elapsedBaseRef.current = held.seconds;
+    }
     setPending(null);
     void start(true);
   }, [start]);
 
   const discardPending = useCallback(() => {
+    const held = pendingRef.current;
     pendingRef.current = null;
     setPending(null);
+    segmentsRef.current = [];
+    sessionIdRef.current = null;
+    setSegmentCount(0);
     elapsedBaseRef.current = 0;
+    elapsedRef.current = 0;
     setElapsed(0);
+    setBackgroundNote(null);
+    if (held) void deleteSegments(held.session);
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* ignore */
+    }
     toast("Nahrávka zahozena.");
   }, []);
 
-
   const importFile = useCallback(
     async (file: File) => {
-      if (file.size > 14 * 1024 * 1024) {
-        toast.error("Soubor je příliš velký (max 14 MB).");
+      if (file.size > MAX_IMPORT_BYTES) {
+        toast.error("Soubor je příliš velký (max 300 MB).");
         return;
       }
       let duration = 0;
@@ -656,12 +875,18 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         duration = await new Promise<number>((resolve) => {
           const audio = document.createElement("audio");
           audio.preload = "metadata";
-          audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
+          audio.onloadedmetadata = () =>
+            resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
           audio.onerror = () => resolve(0);
           audio.src = URL.createObjectURL(file);
         });
       } catch {
         /* ignore */
+      }
+
+      if (duration > MAX_RECORDING_SECONDS) {
+        toast.error("Zvuk je delší než 2 hodiny. Rozdělte ho prosím na kratší části.");
+        return;
       }
 
       const id = crypto.randomUUID();
@@ -671,6 +896,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         duration,
         transcript: "",
         status: "running",
+        stage: "prepare",
+        progress: 0,
         title: file.name,
         hasAudio: true,
         audioName: file.name,
@@ -686,9 +913,20 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         return next;
       });
       void storeAudio(id, file, file.name);
-      void transcribe(file, id, file.name);
+
+      // Dlouhý soubor rozdělíme na segmenty, aby se přepis nezasekl na velikosti.
+      let chunks: Blob[] = [];
+      try {
+        chunks = await fileToWavChunks(file);
+      } catch {
+        chunks = [file];
+      }
+      if (!duration) {
+        update(id, { duration: wavChunksDuration(chunks) });
+      }
+      void runPipeline(id, chunks, language);
     },
-    [recordingGroup, storeAudio, transcribe],
+    [language, recordingGroup, runPipeline, storeAudio, update],
   );
 
   const remove = (id: string) => {
@@ -760,14 +998,27 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
 
 
 
-  const exportText = (rec: Recording, kind: "transcript" | "summary") => {
-    const text = kind === "transcript" ? rec.transcript : (rec.summary ?? "");
+  const exportText = (rec: Recording, kind: "transcript" | "summary" | "translation") => {
+    const text =
+      kind === "transcript"
+        ? rec.transcript
+        : kind === "summary"
+          ? (rec.summary ?? "")
+          : (rec.translation ?? "");
     if (!text.trim()) {
-      toast.error(kind === "transcript" ? "Přepis není hotový." : "Shrnutí není hotové.");
+      toast.error(
+        kind === "transcript"
+          ? "Přepis není hotový."
+          : kind === "summary"
+            ? "Shrnutí není hotové."
+            : "Překlad není hotový.",
+      );
       return;
     }
+    const suffix =
+      kind === "transcript" ? "prepis" : kind === "summary" ? "shrnuti" : "preklad";
     const header = `${rec.title || "Nahrávka"} · ${new Date(rec.createdAt).toLocaleString("cs-CZ")}\n\n`;
-    saveBlob(new Blob([header + text], { type: "text/plain;charset=utf-8" }), `${baseName(rec)}-${kind === "transcript" ? "prepis" : "shrnuti"}.txt`);
+    saveBlob(new Blob([header + text], { type: "text/plain;charset=utf-8" }), `${baseName(rec)}-${suffix}.txt`);
   };
 
 
@@ -1002,7 +1253,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
               >
                 <Upload aria-hidden="true" /> Importovat zvuk
               </Button>
-              <p className="mt-2 text-center text-xs text-muted-foreground">MP3, WAV, M4A a další · max. 14 MB</p>
+              <p className="mt-2 text-center text-xs text-muted-foreground">MP3, WAV, M4A a další · až 2 hodiny (max. 300 MB)</p>
               <div className="mt-5 flex items-start gap-2 border-t border-border pt-5 text-xs leading-5 text-muted-foreground">
                 {syncing ? <CloudUpload className="mt-0.5 size-4 shrink-0 animate-pulse" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />}
                 <span>{user ? (syncing ? "Synchronizuji vaše záznamy…" : "Záznamy jsou dostupné na vašich zařízeních.") : "Bez přihlášení zůstanou záznamy pouze v tomto zařízení."}</span>
@@ -1178,9 +1429,12 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                   onExportAudio={() => void exportAudio(selected)}
                   onExportTranscript={() => exportText(selected, "transcript")}
                   onExportSummary={() => exportText(selected, "summary")}
+                  onExportTranslation={() => exportText(selected, "translation")}
                   onRefreshSummary={() => void summarize(selected.transcript, selected.id)}
                   onTogglePlayer={() => void togglePlayer(selected)}
                   onUpdateTranscript={(text) => update(selected.id, { transcript: text, status: "done" })}
+                  onRetry={() => void retry(selected)}
+                  onTranslate={(targetLang) => void translate(selected, targetLang)}
                 />
               ) : visible.length > 0 ? (
                 <div className="hidden min-h-80 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card p-8 text-center lg:flex"><FileText className="size-8 text-primary" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Otevřete některý přepis</p><p className="mt-1 max-w-xs text-sm leading-6 text-muted-foreground">Vyberte nahrávku vlevo a zobrazí se shrnutí, celý text i všechny exporty.</p></div>

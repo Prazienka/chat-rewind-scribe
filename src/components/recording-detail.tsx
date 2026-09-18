@@ -14,11 +14,21 @@ import {
   Trash2,
   WandSparkles,
   X,
+  Languages,
+  RotateCcw,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration } from "@/lib/wav";
@@ -38,6 +48,15 @@ export type RecordingView = {
   summaryError?: string;
   group?: string;
   hasAudio?: boolean;
+  stage?: "prepare" | "transcribe" | "refine" | "summary" | "translate" | undefined;
+  progress?: number;
+  stageDetail?: string;
+  chunkCount?: number;
+  failedChunks?: number;
+  translation?: string;
+  translationLang?: string;
+  translationStatus?: "running" | "done" | "error";
+  translationError?: string;
 };
 
 type Props = {
@@ -49,13 +68,37 @@ type Props = {
   onExportAudio: () => void;
   onExportTranscript: () => void;
   onExportSummary: () => void;
+  onExportTranslation: () => void;
   onRefreshSummary: () => void;
   onTogglePlayer: () => void;
   onUpdateTranscript: (text: string) => void;
+  onRetry: () => void;
+  onTranslate: (target: string) => void;
+};
+
+const TRANSLATION_LANGS = [
+  { value: "en", label: "Angličtina" },
+  { value: "cs", label: "Čeština" },
+  { value: "de", label: "Němčina" },
+  { value: "sk", label: "Slovenština" },
+  { value: "pl", label: "Polština" },
+  { value: "uk", label: "Ukrajinština" },
+  { value: "es", label: "Španělština" },
+  { value: "fr", label: "Francouzština" },
+  { value: "it", label: "Italština" },
+];
+
+const STAGE_LABELS: Record<string, string> = {
+  prepare: "Připravuji zvuk k přepisu",
+  transcribe: "Přepisuji zvuk",
+  refine: "Upravuji češtinu",
+  summary: "Tvořím shrnutí",
+  translate: "Překládám",
 };
 
 function statusInfo(recording: RecordingView) {
   if (recording.status === "error") return { label: "Přepis selhal", tone: "destructive" as const };
+  if (recording.stage) return { label: STAGE_LABELS[recording.stage] ?? "Zpracovávám", tone: "secondary" as const };
   if (recording.status === "running") return { label: "Přepisuji zvuk", tone: "secondary" as const };
   if (recording.refineStatus === "running") return { label: "Upravuji češtinu", tone: "secondary" as const };
   if (recording.summaryStatus === "running") return { label: "Tvořím shrnutí", tone: "secondary" as const };
@@ -94,14 +137,19 @@ export const RecordingDetail = memo(function RecordingDetail({
   onExportAudio,
   onExportTranscript,
   onExportSummary,
+  onExportTranslation,
   onRefreshSummary,
   onTogglePlayer,
   onUpdateTranscript,
+  onRetry,
+  onTranslate,
 }: Props) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(recording.transcript);
+  const [target, setTarget] = useState(recording.translationLang || "en");
   const status = statusInfo(recording);
+  const busy = Boolean(recording.stage);
 
   const saveEdit = () => {
     onUpdateTranscript(draft.trim());
@@ -133,21 +181,56 @@ export const RecordingDetail = memo(function RecordingDetail({
         </Button>
       </header>
 
+      {busy ? (
+        <div className="border-b border-border bg-muted/30 px-4 py-3 sm:px-6" aria-live="polite">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex items-center gap-2 text-foreground">
+              <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />
+              {STAGE_LABELS[recording.stage ?? ""] ?? "Zpracovávám"}
+              {recording.stageDetail ? <span className="text-muted-foreground">· část {recording.stageDetail}</span> : null}
+            </span>
+            <span className="tabular-nums text-muted-foreground">{recording.progress ?? 0} %</span>
+          </div>
+          <Progress value={recording.progress ?? 0} className="mt-2 h-1.5" aria-label="Průběh zpracování" />
+        </div>
+      ) : null}
+
+      {!busy && recording.failedChunks ? (
+        <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 p-4 sm:m-6" role="alert">
+          <p className="font-medium text-destructive">Některé části se nepodařilo přepsat</p>
+          <p className="mt-1 text-sm text-foreground">
+            Chybí {recording.failedChunks} z {recording.chunkCount ?? "?"} částí. Zbytek přepisu je zachovaný ve správném pořadí.
+          </p>
+          <Button variant="outline" className="mt-3 min-h-11" onClick={onRetry}>
+            <RotateCcw aria-hidden="true" /> Zpracovat znovu
+          </Button>
+        </div>
+      ) : null}
+
       {recording.status === "error" ? (
         <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 p-4 sm:m-6" role="alert">
           <p className="font-medium text-destructive">Přepis se nepodařilo dokončit</p>
           <p className="mt-1 text-sm text-foreground">{recording.error || "Zkuste nahrávku nahrát znovu."}</p>
+          {recording.hasAudio ? (
+            <Button variant="outline" className="mt-3 min-h-11" disabled={busy} onClick={onRetry}>
+              <RotateCcw aria-hidden="true" /> Zkusit přepis znovu
+            </Button>
+          ) : null}
         </div>
       ) : (
         <Tabs defaultValue="summary" className="p-4 sm:p-6">
-          <TabsList className="grid h-11 w-full grid-cols-2 sm:w-auto">
+          <TabsList className="grid h-11 w-full grid-cols-3 sm:w-auto">
             <TabsTrigger value="summary" className="h-9 gap-2">
               <Sparkles aria-hidden="true" /> AI shrnutí
             </TabsTrigger>
             <TabsTrigger value="transcript" className="h-9 gap-2">
               <FileText aria-hidden="true" /> Celý přepis
             </TabsTrigger>
+            <TabsTrigger value="translation" className="h-9 gap-2">
+              <Languages aria-hidden="true" /> Překlad
+            </TabsTrigger>
           </TabsList>
+
 
           <TabsContent value="summary" className="mt-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -206,6 +289,43 @@ export const RecordingDetail = memo(function RecordingDetail({
                 <HighlightedText text={recording.transcript} query={query} />
               ) : (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" aria-hidden="true" /> Přepisuji první slova…</p>
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="translation" className="mt-5">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,14rem)_auto_auto_auto]">
+              <Select value={target} onValueChange={setTarget} disabled={busy}>
+                <SelectTrigger className="h-11" aria-label="Jazyk překladu"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TRANSLATION_LANGS.map((lang) => (
+                    <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button className="min-h-11" disabled={busy || !recording.transcript} onClick={() => onTranslate(target)}>
+                <Languages aria-hidden="true" /> {recording.translation ? "Přeložit znovu" : "Přeložit"}
+              </Button>
+              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Kopírovat překlad" disabled={!recording.translation} onClick={() => onCopy(recording.translation ?? "")}>
+                <Copy aria-hidden="true" />
+              </Button>
+              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Exportovat překlad" disabled={!recording.translation} onClick={onExportTranslation}>
+                <Download aria-hidden="true" />
+              </Button>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              Dlouhé přepisy se překládají po částech a spojí se do jednoho souvislého textu ve stejném pořadí.
+            </p>
+            {recording.translationError ? (
+              <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{recording.translationError}</p>
+            ) : null}
+            <div className="mt-4 max-h-[34rem] overflow-y-auto rounded-md border border-border bg-background p-4 sm:p-5">
+              {recording.translation ? (
+                <p className="whitespace-pre-wrap text-[0.9375rem] leading-7 text-foreground">{recording.translation}</p>
+              ) : recording.translationStatus === "running" ? (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" aria-hidden="true" /> Překládám…</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Vyberte jazyk a spusťte překlad celého přepisu.</p>
               )}
             </div>
           </TabsContent>
