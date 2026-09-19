@@ -41,4 +41,4 @@
 - [x] Stavové a průběhové informace pro nahrávání a zpracování
 - [x] Knihovna s hledáním a filtry podle stavu, data a složky
 - [x] Přehlednější detail přepisu a oddělené destruktivní akce
-- [ ] Ověřit desktop, mobil, přístupnost a hlavní interakce
+- [x] Ověřit desktop, mobil, přístupnost a hlavní interakce

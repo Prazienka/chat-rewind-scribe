@@ -31,6 +31,8 @@ import {
   Clock3,
   SlidersHorizontal,
   Radio,
+  X,
+  ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -133,6 +135,7 @@ const STORAGE_KEY = "zapisnik.recordings";
 const GROUPS_KEY = "zapisnik.groups";
 const ACTIVE_GROUP_KEY = "zapisnik.active-group";
 const DRAFT_KEY = "zapisnik.draft";
+const ONBOARDING_KEY = "chat-scribe.onboarding-complete";
 const LANGS = [
   { value: "cs", label: "Čeština" },
   { value: "auto", label: "Automaticky" },
@@ -195,6 +198,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [segmentCount, setSegmentCount] = useState(0);
   const [backgroundNote, setBackgroundNote] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -252,6 +256,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       if (rawGroups) setGroups(JSON.parse(rawGroups));
       const activeGroup = localStorage.getItem(ACTIVE_GROUP_KEY);
       if (activeGroup) setRecordingGroup(activeGroup);
+      setShowOnboarding(localStorage.getItem(ONBOARDING_KEY) !== "1");
     } catch {
       /* ignore */
     }
@@ -1396,7 +1401,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           Boolean(recording.stage) ||
           recording.status === "running" ||
           recording.refineStatus === "running" ||
-          recording.summaryStatus === "running",
+          recording.summaryStatus === "running" ||
+          recording.translationStatus === "running" ||
+          recording.uploadStatus === "running",
       ).length,
     [recordings],
   );
@@ -1408,7 +1415,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           Boolean(recording.stage) ||
           recording.status === "running" ||
           recording.refineStatus === "running" ||
-          recording.summaryStatus === "running",
+          recording.summaryStatus === "running" ||
+          recording.translationStatus === "running" ||
+          recording.uploadStatus === "running",
       ),
     [recordings],
   );
@@ -1428,6 +1437,31 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       document.getElementById("recording-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
+
+  const dismissOnboarding = () => {
+    setShowOnboarding(false);
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const recorderState = isRecording
+    ? sessionLabel(sessionState)
+    : processingRecordings.length > 0
+      ? "Zpracovává se"
+      : sessionState.phase === "saved"
+        ? "Uloženo"
+        : sessionState.phase === "error"
+          ? "Chyba"
+          : "Připraveno";
+  const recorderStateTone =
+    sessionState.phase === "error" || sessionState.phase === "interrupted"
+      ? "destructive"
+      : isRecording || processingRecordings.length > 0
+        ? "secondary"
+        : "outline";
 
   return (
     <div className="min-h-dvh bg-background pb-24 sm:pb-12">
@@ -1472,32 +1506,53 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       </header>
 
       <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
+        {mode === "recorder" && showOnboarding ? (
+          <section className="mb-5 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5" aria-labelledby="onboarding-title">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <ListChecks className="size-5 shrink-0 text-primary" aria-hidden="true" />
+                  <h2 id="onboarding-title" className="font-display text-base font-semibold text-foreground">Začněte během chvilky</h2>
+                </div>
+                <ol className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                  <li className="flex gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">1</span><span><strong className="block text-foreground">Spusťte nahrávání</strong><span className="text-muted-foreground">Velké tlačítko vždy ukazuje aktuální stav.</span></span></li>
+                  <li className="flex gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">2</span><span><strong className="block text-foreground">Sledujte stav</strong><span className="text-muted-foreground">Pozadí ani obnova neznamenají ukončení.</span></span></li>
+                  <li className="flex gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">3</span><span><strong className="block text-foreground">Otevřete Knihovnu</strong><span className="text-muted-foreground">Najdete tam přepis, shrnutí i exporty.</span></span></li>
+                </ol>
+                <Button variant="link" className="mt-2 h-11 px-0" onClick={dismissOnboarding}>Rozumím, skrýt průvodce</Button>
+              </div>
+              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Přeskočit průvodce a příště nezobrazovat" onClick={dismissOnboarding}><X aria-hidden="true" /></Button>
+            </div>
+          </section>
+        ) : null}
+
         {mode === "recorder" ? (
-        <section id="record" className="scroll-mt-24 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-          <div className="grid lg:grid-cols-[minmax(0,1.4fr)_minmax(19rem,0.6fr)]">
-            <div className="flex min-h-[31rem] flex-col items-center justify-center p-6 text-center sm:p-12">
-              <Badge variant="secondary" className="mb-4 gap-2"><Radio className="size-3.5" aria-hidden="true" /> Připraveno</Badge>
+          <section id="record" className="scroll-mt-24 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+            <div className="grid lg:grid-cols-[minmax(0,1.4fr)_minmax(19rem,0.6fr)]">
+              <div className="flex min-h-[31rem] flex-col items-center justify-center p-6 text-center sm:p-12">
+              <Badge variant={recorderStateTone} className="mb-4 gap-2" aria-live="polite"><Radio className={`size-3.5 ${isRecording ? "animate-pulse" : ""}`} aria-hidden="true" /> {recorderState}</Badge>
               <h1 className="font-display text-3xl font-bold text-foreground sm:text-5xl">Nová nahrávka</h1>
               <p className="mt-3 max-w-lg text-base leading-7 text-muted-foreground">Spusťte nahrávání rozhovoru. Přepis a stručné shrnutí připravíme automaticky.</p>
 
-              <div className="relative mt-8 flex h-24 items-center justify-center">
-              {isRecording && (
-                <span
+              <div className="relative mt-8 flex h-20 items-center justify-center">
+                {isRecording && (
+                  <span
                     className="absolute size-20 rounded-full bg-destructive/10 transition-transform duration-100 motion-reduce:transform-none"
-                  style={{ transform: `scale(${1 + Math.min(level, 0.6)})` }}
-                />
-              )}
-              <Button
-                onClick={() => void (isRecording ? stop() : start())}
+                    style={{ transform: `scale(${1 + Math.min(level, 0.6)})` }}
+                  />
+                )}
+                <Button
+                  onClick={() => void (isRecording ? stop() : start())}
                   className="relative h-16 min-w-60 rounded-lg px-8 text-base font-semibold shadow-lg transition-transform hover:-translate-y-0.5 motion-reduce:transform-none"
-                variant={isRecording ? "destructive" : "default"}
-                aria-label={isRecording ? "Zastavit nahrávání" : "Začít nahrávat"}
-              >
+                  variant={isRecording ? "destructive" : "default"}
+                  aria-label={isRecording ? "Zastavit nahrávání" : "Začít nahrávat"}
+                >
                   {isRecording ? <Square className="size-5" aria-hidden="true" /> : <Mic className="size-5" aria-hidden="true" />}
                   {isRecording ? "Zastavit nahrávání" : "Spustit nahrávání"}
-              </Button>
+                </Button>
+              </div>
               <p className="mt-5 font-display text-4xl font-bold tabular-nums text-foreground" aria-live="off">
-              {formatDuration(elapsed)}
+                {formatDuration(elapsed)}
               </p>
               <div className="mt-2 flex items-center gap-2 text-sm" aria-live="polite">
                 <Circle className={`size-2.5 ${isRecording ? "fill-destructive text-destructive" : "fill-muted-foreground text-muted-foreground"}`} aria-hidden="true" />
@@ -1518,9 +1573,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                   {backgroundNote}
                 </p>
               ) : null}
-            </div>
+              </div>
 
-            <aside id="settings" className="scroll-mt-24 border-t border-border bg-muted/35 p-5 lg:border-l lg:border-t-0 sm:p-7">
+              <aside id="settings" className="scroll-mt-24 border-t border-border bg-muted/35 p-5 sm:p-7 lg:border-l lg:border-t-0">
               <div className="flex items-center gap-2"><Settings2 className="size-4 text-primary" aria-hidden="true" /><h2 className="font-display text-base font-semibold text-foreground">Před nahráváním</h2></div>
               <div className="mt-5 space-y-5">
                 <div className="space-y-2">
@@ -1572,9 +1627,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                 {syncing ? <CloudUpload className="mt-0.5 size-4 shrink-0 animate-pulse" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />}
                 <span>{user ? (syncing ? "Synchronizuji vaše záznamy…" : "Záznamy jsou dostupné na vašich zařízeních.") : "Bez přihlášení zůstanou záznamy pouze v tomto zařízení."}</span>
               </div>
-            </aside>
-          </div>
-        </section>
+              </aside>
+            </div>
+          </section>
 
         ) : null}
 
@@ -1712,7 +1767,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           )}
 
           <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.25fr)]">
-            <div className="space-y-2" aria-label="Seznam nahrávek">
+            <div className={`space-y-2 ${selected ? "hidden lg:block" : ""}`} aria-label="Seznam nahrávek">
             {visible.map((rec) => {
               const isProcessing = Boolean(rec.stage) || rec.status === "running" || rec.refineStatus === "running" || rec.summaryStatus === "running" || rec.translationStatus === "running" || rec.uploadStatus === "running";
               return (
@@ -1756,7 +1811,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                     {isProcessing ? <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" /> : rec.status === "error" ? <AlertCircle className="size-4 text-destructive" aria-hidden="true" /> : <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />}
                     <span className={`text-xs font-medium ${rec.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>{rec.status === "error" ? "Přepis selhal" : rec.status === "running" ? "Přepisuji zvuk…" : rec.refineStatus === "running" ? "Upravuji češtinu…" : rec.summaryStatus === "running" ? "Tvořím shrnutí…" : "Přepis je připravený"}</span>
                   </div>
-                  {isProcessing ? <Progress value={rec.status === "running" ? 35 : rec.refineStatus === "running" ? 65 : 85} className="mt-2 h-1.5" aria-label="Průběh zpracování" /> : null}
+                   {isProcessing ? <Progress value={rec.progress ?? (rec.status === "running" ? 35 : rec.refineStatus === "running" ? 65 : 85)} className="mt-2 h-1.5" aria-label="Průběh zpracování" /> : null}
                 </div>
                 <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`Otevřít ${rec.title || "nahrávku"}`} onClick={() => openRecording(rec.id)}><ChevronRight aria-hidden="true" /></Button>
               </div>

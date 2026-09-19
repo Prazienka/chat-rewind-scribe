@@ -34,6 +34,17 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { formatDuration } from "@/lib/wav";
 
 export type RecordingView = {
@@ -104,10 +115,14 @@ const STAGE_LABELS: Record<string, string> = {
 
 function statusInfo(recording: RecordingView) {
   if (recording.status === "error") return { label: "Přepis selhal", tone: "destructive" as const };
+  if (recording.uploadStatus === "error") return { label: "Cloudové uložení selhalo", tone: "destructive" as const };
+  if (recording.translationStatus === "error") return { label: "Překlad selhal", tone: "destructive" as const };
   if (recording.stage) return { label: STAGE_LABELS[recording.stage] ?? "Zpracovávám", tone: "secondary" as const };
+  if (recording.uploadStatus === "running") return { label: "Ukládám zvuk", tone: "secondary" as const };
   if (recording.status === "running") return { label: "Přepisuji zvuk", tone: "secondary" as const };
   if (recording.refineStatus === "running") return { label: "Upravuji češtinu", tone: "secondary" as const };
   if (recording.summaryStatus === "running") return { label: "Tvořím shrnutí", tone: "secondary" as const };
+  if (recording.translationStatus === "running") return { label: "Překládám", tone: "secondary" as const };
   return { label: "Hotovo", tone: "outline" as const };
 }
 
@@ -155,7 +170,13 @@ export const RecordingDetail = memo(function RecordingDetail({
   const [draft, setDraft] = useState(recording.transcript);
   const [target, setTarget] = useState(recording.translationLang || "en");
   const status = statusInfo(recording);
-  const busy = Boolean(recording.stage);
+  const busy =
+    Boolean(recording.stage) ||
+    recording.status === "running" ||
+    recording.refineStatus === "running" ||
+    recording.summaryStatus === "running" ||
+    recording.translationStatus === "running" ||
+    recording.uploadStatus === "running";
 
   const saveEdit = () => {
     onUpdateTranscript(draft.trim());
@@ -171,7 +192,7 @@ export const RecordingDetail = memo(function RecordingDetail({
           </Button>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Badge variant={status.tone} className="gap-1.5">
-              {recording.status === "running" || recording.refineStatus === "running" || recording.summaryStatus === "running" ? (
+              {busy ? (
                 <Loader2 className="size-3 animate-spin" aria-hidden="true" />
               ) : null}
               {status.label}
@@ -367,7 +388,21 @@ export const RecordingDetail = memo(function RecordingDetail({
           </>
         ) : null}
         <span className="hidden flex-1 sm:block" />
-        <Button variant="ghost" className="min-h-11 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onDelete}><Trash2 aria-hidden="true" /> Smazat nahrávku</Button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" className="min-h-11 text-destructive hover:bg-destructive/10 hover:text-destructive"><Trash2 aria-hidden="true" /> Smazat nahrávku</Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Smazat tuto nahrávku?</AlertDialogTitle>
+              <AlertDialogDescription>Zvuk, přepis, shrnutí i překlad budou trvale odstraněny. Tuto akci nelze vrátit.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Zrušit</AlertDialogCancel>
+              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={onDelete}>Smazat nahrávku</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {audioUrl ? <audio className="w-full" controls src={audioUrl}>Váš prohlížeč nepodporuje přehrávání zvuku.</audio> : null}
       </footer>
     </article>
