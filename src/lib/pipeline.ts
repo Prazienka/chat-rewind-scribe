@@ -167,9 +167,91 @@ export function splitText(text: string, limit = TEXT_CHUNK_CHARS): string[] {
   return parts.filter(Boolean);
 }
 
+export type LongTextResult = {
+  /** Spojený výsledek v původním pořadí. */
+  text: string;
+  /** Jednotlivé hotové části; prázdný řetězec = část se nepodařila. */
+  parts: string[];
+  total: number;
+  failed: number;
+  failedIndexes: number[];
+  /** Konkrétní popis poslední chyby pro UI. */
+  error?: string;
+};
+
+type ChunkOutcome = { text: string; error?: string; terminal?: boolean };
+
+/** Lidsky pochopitelná hláška podle stavu odpovědi serveru. */
+function describeHttpFailure(status: number, serverMessage: string): string {
+  if (serverMessage) return serverMessage;
+  if (status === 400) return "Text k odeslání nebyl přijat (prázdný nebo poškozený obsah).";
+  if (status === 401 || status === 403) return "Přístup k AI službě byl odmítnut.";
+  if (status === 402) return "V pracovním prostoru chybí AI kredity.";
+  if (status === 413) return "Část textu je příliš dlouhá.";
+  if (status === 429) return "Příliš mnoho požadavků, zkuste to prosím za chvíli.";
+  if (status >= 500) return `AI služba je momentálně nedostupná (${status}).`;
+  return `Zpracování se nepodařilo (${status}).`;
+}
+
+/** Jedna část textu → odpověď modelu. Hlídáme zastavení streamu, ne celkovou délku. */
+async function runTextChunk(
+  endpoint: string,
+  part: string,
+  payload: Record<string, unknown> | undefined,
+  onDelta: (output: string) => void,
+): Promise<ChunkOutcome> {
+  let lastError = "Zpracování části se nepodařilo.";
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    let stall: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      if (stall) clearTimeout(stall);
+      stall = setTimeout(() => controller.abort(), TEXT_STALL_MS);
+    };
+    let output = "";
+    try {
+      arm();
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, text: part }),
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        const serverMessage = await errorMessage(response, "");
+        lastError = describeHttpFailure(response.status, serverMessage);
+        // Vstupní a přístupové chyby nemá smysl opakovat.
+        if ([400, 401, 402, 403, 413].includes(response.status)) {
+          return { text: "", error: lastError, terminal: true };
+        }
+        await sleep(attempt * 1500);
+        continue;
+      }
+      await readSse(response, (event) => {
+        arm();
+        if (event.type === "response.output_text.delta" && event.delta) {
+          output += event.delta;
+          onDelta(output);
+        } else if (event.type === "response.completed" && !output && event.text) {
+          output = event.text;
+          onDelta(output);
+        }
+      });
+      if (output.trim()) return { text: output.trim() };
+      lastError = "AI služba nevrátila žádný přeložený text.";
+    } catch {
+      lastError = "Spojení se přerušilo nebo AI služba přestala odpovídat.";
+    } finally {
+      if (stall) clearTimeout(stall);
+    }
+    if (attempt < MAX_ATTEMPTS) await sleep(attempt * 1500);
+  }
+  return { text: "", error: lastError };
+}
+
 /**
  * Pošle dlouhý text po částech na zadaný endpoint a spojí odpovědi v původním pořadí.
- * Streamovaný mezivýsledek předáváme dál, aby UI hned ukazovalo postup.
+ * Už hotové části lze předat v `initialParts`, takže opakování dokončí jen to, co chybí.
  */
 export async function processLongText(
   endpoint: string,
@@ -178,67 +260,77 @@ export async function processLongText(
     payload?: Record<string, unknown>;
     limit?: number;
     preserveInputOnFailure?: boolean;
+    initialParts?: string[];
     onPartial?: (text: string) => void;
     onProgress?: (progress: StageProgress) => void;
   } = {},
-): Promise<{ text: string; failed: number }> {
-  const parts = splitText(text, options.limit ?? TEXT_CHUNK_CHARS);
-  const done: string[] = [];
-  let failed = 0;
+): Promise<LongTextResult> {
+  const source = splitText(text, options.limit ?? TEXT_CHUNK_CHARS);
+  const results: string[] = source.map((part, index) => {
+    const existing = options.initialParts?.[index];
+    return existing && existing.trim() && source.length === options.initialParts?.length
+      ? existing
+      : part === undefined
+        ? ""
+        : "";
+  });
+  const failedIndexes: number[] = [];
+  let lastError: string | undefined;
 
-  for (let index = 0; index < parts.length; index++) {
-    const part = parts[index];
-    if (!part) continue;
-    let output = "";
-    let ok = false;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !ok; attempt++) {
-      output = "";
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), TEXT_TIMEOUT_MS);
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...options.payload, text: part }),
-          signal: controller.signal,
-        });
-        if (!response.ok || !response.body) {
-          if (response.status === 400) break;
-          clearTimeout(timeout);
-          await sleep(attempt * 1500);
-          continue;
-        }
-        await readSse(response, (event) => {
-          if (event.type === "response.output_text.delta" && event.delta) {
-            output += event.delta;
-            options.onPartial?.([...done, output].join("\n\n"));
-          }
-        });
-        ok = output.trim().length > 0;
-        if (!ok) await sleep(attempt * 1000);
-      } catch {
-        if (attempt < MAX_ATTEMPTS) await sleep(attempt * 1500);
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-    if (ok) done.push(output.trim());
-    else {
-      failed++;
-      done.push(
-        options.preserveInputOnFailure
-          ? part
-          : `[část ${index + 1} se nepodařilo zpracovat]`,
-      );
-    }
-    options.onPartial?.(done.join("\n\n"));
+  const joined = () =>
+    results
+      .map((value, index) =>
+        value.trim()
+          ? value
+          : options.preserveInputOnFailure
+            ? (source[index] ?? "")
+            : `[část ${index + 1} se nepodařilo zpracovat]`,
+      )
+      .join("\n\n")
+      .trim();
+
+  const report = (done: number) => {
+    options.onPartial?.(joined());
     options.onProgress?.({
-      done: index + 1,
-      total: parts.length,
-      percent: Math.round(((index + 1) / parts.length) * 100),
+      done,
+      total: source.length,
+      percent: Math.round((done / source.length) * 100),
     });
+  };
+
+  let terminal = false;
+  for (let index = 0; index < source.length; index++) {
+    const part = source[index];
+    if (!part) continue;
+    if (results[index]?.trim()) {
+      report(index + 1);
+      continue;
+    }
+    if (terminal) {
+      failedIndexes.push(index);
+      continue;
+    }
+    const outcome = await runTextChunk(endpoint, part, options.payload, (output) => {
+      const preview = [...results.slice(0, index), output].filter(Boolean).join("\n\n");
+      options.onPartial?.(preview);
+    });
+    if (outcome.text) {
+      results[index] = outcome.text;
+    } else {
+      failedIndexes.push(index);
+      lastError = outcome.error ?? lastError;
+      if (outcome.terminal) terminal = true;
+    }
+    report(index + 1);
     await sleep(0);
   }
 
-  return { text: done.join("\n\n").trim(), failed };
+  return {
+    text: joined(),
+    parts: results,
+    total: source.length,
+    failed: failedIndexes.length,
+    failedIndexes,
+    ...(lastError ? { error: lastError } : {}),
+  };
 }
