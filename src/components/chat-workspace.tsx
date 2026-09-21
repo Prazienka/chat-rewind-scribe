@@ -527,46 +527,70 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   );
 
   const translate = useCallback(
-    async (rec: Recording, target: string) => {
-      if (!rec.transcript.trim()) {
-        toast.error("Nejdřív je potřeba hotový přepis.");
+    async (rec: Recording, target: string, options: { resume?: boolean } = {}) => {
+      const source = rec.transcript.trim();
+      if (!source) {
+        toast.error("Nejdřív je potřeba hotový přepis. Spusťte přepis a zkuste to znovu.");
         return;
       }
+      if (rec.translationStatus === "running") return;
+      // Pokračování opravuje jen chybějící části; jiný jazyk začíná od začátku.
+      const resume =
+        options.resume === true &&
+        rec.translationLang === target &&
+        Array.isArray(rec.translationParts) &&
+        rec.translationParts.length > 0;
       update(rec.id, {
         translationStatus: "running",
-        translation: "",
         translationLang: target,
         translationError: "",
         stage: "translate",
         progress: 0,
-        stageDetail: "",
+        stageDetail: resume ? "pokračuji v chybějících částech" : "příprava",
+        ...(resume ? {} : { translation: "", translationParts: [] }),
       });
-      const { text, failed } = await processLongText("/api/translate", rec.transcript, {
+      const result = await processLongText("/api/translate", source, {
         payload: { target },
+        limit: TRANSLATE_CHUNK_CHARS,
+        preserveInputOnFailure: false,
+        ...(resume ? { initialParts: rec.translationParts } : {}),
         onPartial: (partial) => update(rec.id, { translation: partial }),
         onProgress: (progress) =>
           update(rec.id, {
             progress: progress.percent,
-            stageDetail: progress.total > 1 ? `${progress.done}/${progress.total}` : "",
+            stageDetail: progress.total > 1 ? `${progress.done}/${progress.total}` : "překládám",
           }),
       });
-      if (!text.trim()) {
+      const done = result.parts.filter((part) => part.trim()).length;
+      if (done === 0) {
         update(rec.id, {
           translationStatus: "error",
-          translationError: "Překlad se nepodařil. Zkuste to prosím znovu.",
+          translationError:
+            result.error ?? "Překlad se nepodařil dokončit. Zkuste to prosím znovu.",
+          translationParts: result.parts,
           stage: undefined,
+          progress: 0,
+          stageDetail: "",
         });
+        toast.error(result.error ?? "Překlad se nepodařil dokončit.");
         return;
       }
       update(rec.id, {
-        translation: text,
-        translationStatus: failed > 0 ? "error" : "done",
-        ...(failed > 0
-          ? { translationError: `${failed} část(i) se nepodařilo přeložit – zkuste to znovu.` }
-          : {}),
+        translation: result.text,
+        translationParts: result.parts,
+        translationStatus: result.failed > 0 ? "error" : "done",
+        ...(result.failed > 0
+          ? {
+              translationError: `Přeloženo ${done} z ${result.total} částí. ${
+                result.error ?? "Zbytek se nepodařil."
+              } Tlačítkem „Dokončit chybějící části“ pokračujete bez ztráty hotového textu.`,
+            }
+          : { translationError: "" }),
         stage: undefined,
         progress: 100,
+        stageDetail: "",
       });
+      if (result.failed === 0) toast.success("Překlad je hotový.");
     },
     [update],
   );
