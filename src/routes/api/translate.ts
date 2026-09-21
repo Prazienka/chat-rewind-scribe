@@ -29,12 +29,21 @@ export const Route = createFileRoute("/api/translate")({
           target?: string;
         } | null;
         const text = body?.text?.trim();
+        const MAX_CHARS = 12_000;
         const target = LANG_NAMES[body?.target ?? "en"] ?? "angličtiny";
         if (!text) {
-          return new Response(JSON.stringify({ error: "Chybí text k překladu." }), {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ error: "Přepis je prázdný, není co přeložit." }),
+            { status: 400, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (text.length > MAX_CHARS) {
+          return new Response(
+            JSON.stringify({
+              error: "Část textu je příliš dlouhá; rozdělte přepis na menší části.",
+            }),
+            { status: 413, headers: { "Content-Type": "application/json" } },
+          );
         }
 
         const system = `Jsi profesionální překladatel. Přelož dodaný úryvek přepisu rozhovoru do ${target}.
@@ -70,10 +79,14 @@ Pravidla:
           console.error(`Translate failed [${response.status}]: ${detail}`);
           const message =
             response.status === 402
-              ? "Na pracovním prostoru chybí AI kredity."
+              ? "V pracovním prostoru chybí AI kredity pro překlad."
               : response.status === 429
                 ? "Příliš mnoho požadavků, zkuste to prosím za chvíli."
-                : `Překlad se nepodařil (${response.status}).`;
+                : response.status === 401 || response.status === 403
+                  ? "Přístup k AI službě pro překlad byl odmítnut."
+                  : response.status >= 500
+                    ? "AI služba pro překlad je momentálně nedostupná."
+                    : `Překlad se nepodařil (${response.status}).`;
           return new Response(JSON.stringify({ error: message }), {
             status: response.status,
             headers: { "Content-Type": "application/json" },
