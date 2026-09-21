@@ -44,7 +44,7 @@ describe("AI překlad", () => {
   });
 
   it("dlouhý text rozdělí a spojí v původním pořadí", async () => {
-    const blocks = Array.from({ length: 40 }, (_, i) => `Odstavec ${i}. Delší obsah větou.`);
+    const blocks = Array.from({ length: 200 }, (_, i) => `Odstavec ${i}. Delší obsah větou.`);
     const input = blocks.join("\n\n");
     let call = 0;
     vi.stubGlobal("fetch", async () => sseResponse(`part${call++}`));
@@ -80,7 +80,7 @@ describe("AI překlad", () => {
   });
 
   it("zachová hotové části a dokončí jen chybějící", async () => {
-    const blocks = Array.from({ length: 40 }, (_, i) => `Odstavec ${i}. Delší obsah větou.`);
+    const blocks = Array.from({ length: 200 }, (_, i) => `Odstavec ${i}. Delší obsah větou.`);
     const input = blocks.join("\n\n");
     const total = splitText(input, TRANSLATE_CHUNK_CHARS).length;
     const initialParts = Array.from({ length: total }, (_, i) => (i === 0 ? "hotovo0" : ""));
