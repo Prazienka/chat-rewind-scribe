@@ -11,8 +11,9 @@ export type StageProgress = {
 
 const MAX_ATTEMPTS = 3;
 const TEXT_CHUNK_CHARS = 8000;
+export const TRANSLATE_CHUNK_CHARS = 3000;
 const TRANSCRIBE_TIMEOUT_MS = 90_000;
-const TEXT_TIMEOUT_MS = 75_000;
+const TEXT_STALL_MS = 120_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -266,13 +267,13 @@ export async function processLongText(
   } = {},
 ): Promise<LongTextResult> {
   const source = splitText(text, options.limit ?? TEXT_CHUNK_CHARS);
-  const results: string[] = source.map((part, index) => {
-    const existing = options.initialParts?.[index];
-    return existing && existing.trim() && source.length === options.initialParts?.length
-      ? existing
-      : part === undefined
-        ? ""
-        : "";
+  const reuse =
+    options.initialParts && options.initialParts.length === source.length
+      ? options.initialParts
+      : undefined;
+  const results: string[] = source.map((_, index) => {
+    const existing = reuse?.[index];
+    return existing && existing.trim() ? existing : "";
   });
   const failedIndexes: number[] = [];
   let lastError: string | undefined;
