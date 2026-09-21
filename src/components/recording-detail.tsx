@@ -72,7 +72,6 @@ export type RecordingView = {
   translationStatus?: "running" | "done" | "error";
   translationError?: string;
   translationParts?: string[];
-  stageDetail?: string;
   uploadProgress?: number;
   uploadStatus?: "running" | "done" | "error";
 };
