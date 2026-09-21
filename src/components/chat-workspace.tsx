@@ -88,7 +88,7 @@ import {
   mergeWavBlobs,
   wavChunksDuration,
 } from "@/lib/audio-chunks";
-import { processLongText, transcribeChunks } from "@/lib/pipeline";
+import { processLongText, transcribeChunks, TRANSLATE_CHUNK_CHARS } from "@/lib/pipeline";
 import {
   initialSessionState,
   isDataStale,
@@ -127,6 +127,7 @@ type Recording = {
   translationLang?: string;
   translationStatus?: "running" | "done" | "error";
   translationError?: string;
+  translationParts?: string[];
   uploadProgress?: number;
   uploadStatus?: "running" | "done" | "error";
 };
@@ -1860,7 +1861,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                   onTogglePlayer={() => void togglePlayer(selected)}
                   onUpdateTranscript={(text) => update(selected.id, { transcript: text, status: "done" })}
                   onRetry={() => void retry(selected)}
-                  onTranslate={(targetLang) => void translate(selected, targetLang)}
+                  onTranslate={(targetLang, options) => void translate(selected, targetLang, options)}
                 />
               ) : visible.length > 0 ? (
                 <div className="hidden min-h-80 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card p-8 text-center lg:flex"><FileText className="size-8 text-primary" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Otevřete některý přepis</p><p className="mt-1 max-w-xs text-sm leading-6 text-muted-foreground">Vyberte nahrávku vlevo a zobrazí se shrnutí, celý text i všechny exporty.</p></div>

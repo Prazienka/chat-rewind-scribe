@@ -71,6 +71,8 @@ export type RecordingView = {
   translationLang?: string;
   translationStatus?: "running" | "done" | "error";
   translationError?: string;
+  translationParts?: string[];
+  stageDetail?: string;
   uploadProgress?: number;
   uploadStatus?: "running" | "done" | "error";
 };
@@ -89,7 +91,7 @@ type Props = {
   onTogglePlayer: () => void;
   onUpdateTranscript: (text: string) => void;
   onRetry: () => void;
-  onTranslate: (target: string) => void;
+  onTranslate: (target: string, options?: { resume?: boolean }) => void;
 };
 
 const TRANSLATION_LANGS = [
@@ -361,8 +363,33 @@ export const RecordingDetail = memo(function RecordingDetail({
             <p className="mt-3 text-xs leading-5 text-muted-foreground">
               Dlouhé přepisy se překládají po částech a spojí se do jednoho souvislého textu ve stejném pořadí.
             </p>
+            {recording.translationStatus === "running" ? (
+              <div className="mt-3">
+                <p className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span>
+                    {recording.stageDetail
+                      ? `Překládám – ${recording.stageDetail}`
+                      : "Připravuji překlad…"}
+                  </span>
+                  <span className="tabular-nums">{recording.progress ?? 0} %</span>
+                </p>
+                <Progress value={recording.progress ?? 0} className="mt-2 h-1.5" aria-label="Průběh překladu" />
+              </div>
+            ) : null}
             {recording.translationError ? (
-              <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{recording.translationError}</p>
+              <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-4" role="alert">
+                <p className="text-sm text-destructive">{recording.translationError}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(recording.translationParts ?? []).some((part) => part.trim()) ? (
+                    <Button variant="outline" className="min-h-11" disabled={busy} onClick={() => onTranslate(target, { resume: true })}>
+                      <Languages aria-hidden="true" /> Dokončit chybějící části
+                    </Button>
+                  ) : null}
+                  <Button variant="outline" className="min-h-11" disabled={busy} onClick={() => onTranslate(target)}>
+                    <Languages aria-hidden="true" /> Zkusit znovu od začátku
+                  </Button>
+                </div>
+              </div>
             ) : null}
             <div className="mt-4 max-h-[34rem] overflow-y-auto rounded-md border border-border bg-background p-4 sm:p-5">
               {recording.translation ? (
