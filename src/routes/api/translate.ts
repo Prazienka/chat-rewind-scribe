@@ -29,7 +29,7 @@ export const Route = createFileRoute("/api/translate")({
         const key = process.env["OPENAI_API_KEY"];
         if (!key) {
           return json(
-            503,
+            401,
             "Překlad není nastaven: chybí klíč OpenAI (OPENAI_API_KEY) v nastavení projektu.",
           );
         }
