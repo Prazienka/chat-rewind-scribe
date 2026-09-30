@@ -593,7 +593,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       });
       if (result.failed === 0) toast.success("Překlad je hotový.");
     },
-    [update],
+    [language, update],
   );
 
   // Hlavní zpracování: segmenty → přepis → česká korektura → shrnutí.
