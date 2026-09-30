@@ -551,7 +551,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         ...(resume ? {} : { translation: "", translationParts: [] }),
       });
       const result = await processLongText("/api/translate", source, {
-        payload: { target },
+        payload: { target, source: language },
         limit: TRANSLATE_CHUNK_CHARS,
         preserveInputOnFailure: false,
         ...(resume ? { initialParts: rec.translationParts } : {}),
@@ -593,7 +593,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       });
       if (result.failed === 0) toast.success("Překlad je hotový.");
     },
-    [update],
+    [language, update],
   );
 
   // Hlavní zpracování: segmenty → přepis → česká korektura → shrnutí.
