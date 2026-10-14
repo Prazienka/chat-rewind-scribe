@@ -68,6 +68,7 @@
 
 :root {
   --radius: 0.75rem;
+  --shadow-record: 0 18px 40px -12px color-mix(in oklab, var(--primary) 45%, transparent);
   --background: oklch(0.975 0.004 225);
   --foreground: oklch(0.215 0.025 252);
   --card: oklch(1 0 0);

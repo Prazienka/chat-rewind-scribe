@@ -1961,9 +1961,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         )}
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-2 border-t border-border bg-background/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden" aria-label="Mobilní navigace">
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-border bg-background/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden" aria-label="Mobilní navigace">
         <Button variant={mode === "recorder" ? "secondary" : "ghost"} className="h-14 flex-col gap-1 text-xs" asChild><Link to="/"><Mic aria-hidden="true" />Nahrávání</Link></Button>
         <Button variant={mode === "library" ? "secondary" : "ghost"} className="h-14 flex-col gap-1 text-xs" asChild><Link to="/transcripts"><Library aria-hidden="true" />Knihovna{processingCount > 0 ? <span className="sr-only">, {processingCount} se zpracovává</span> : null}</Link></Button>
+        <Button variant="ghost" className="h-14 flex-col gap-1 text-xs" asChild><Link to="/" hash="nastaveni"><Settings2 aria-hidden="true" />Nastavení</Link></Button>
       </nav>
 
       {showBack && (
