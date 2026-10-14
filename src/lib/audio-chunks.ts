@@ -3,7 +3,7 @@ import { encodeWav } from "./wav";
 /** Délka jednoho bezpečného segmentu nahrávky v sekundách. */
 export const SEGMENT_SECONDS = 240;
 /** Jak často se živá nahrávka bezpečně odloží do IndexedDB. */
-export const RECORDING_CHECKPOINT_SECONDS = 30;
+export const RECORDING_CHECKPOINT_SECONDS = 8;
 /** Vzorkovací frekvence, se kterou pracuje přepis (16 kHz mono = nejlepší poměr kvalita/velikost). */
 export const TARGET_RATE = 16000;
 /** Maximální délka jedné nahrávky – 2 hodiny. */

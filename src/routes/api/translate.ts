@@ -62,7 +62,11 @@ async function callProvider(
     try {
       const response = await fetch(provider.url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${provider.key}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${provider.key}`,
+          ...(provider.name === "lovable" ? { "X-Lovable-AIG-SDK": "fetch" } : {}),
+        },
         body: JSON.stringify({
           model: provider.model,
           stream: true,
