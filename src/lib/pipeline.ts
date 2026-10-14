@@ -11,7 +11,7 @@ export type StageProgress = {
 
 const MAX_ATTEMPTS = 3;
 const TEXT_CHUNK_CHARS = 8000;
-export const TRANSLATE_CHUNK_CHARS = 3000;
+export const TRANSLATE_CHUNK_CHARS = 2000;
 const TRANSCRIBE_TIMEOUT_MS = 90_000;
 const TEXT_STALL_MS = 120_000;
 
