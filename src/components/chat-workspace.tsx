@@ -147,6 +147,28 @@ const LANGS = [
   { value: "de", label: "Němčina" },
 ];
 
+function Waveform({ level, active }: { level: number; active: boolean }) {
+  const [bars, setBars] = useState<number[]>(() => Array.from({ length: 40 }, () => 0));
+  useEffect(() => {
+    if (!active) {
+      setBars((prev) => prev.map(() => 0));
+      return;
+    }
+    setBars((prev) => [...prev.slice(1), Math.min(1, level * 2.2)]);
+  }, [level, active]);
+  return (
+    <div className="mt-6 flex h-12 w-full max-w-sm items-center justify-center gap-[3px]" aria-hidden="true">
+      {bars.map((value, i) => (
+        <span
+          key={i}
+          className={`w-1 rounded-full transition-[height] duration-100 motion-reduce:transition-none ${active ? "bg-destructive/80" : "bg-border"}`}
+          style={{ height: `${Math.max(4, value * 48)}px` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 const recoverInterruptedProcessing = (recording: Recording): Recording => {
   if (
     recording.status !== "running" &&
@@ -1620,23 +1642,26 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
               <h1 className="font-display text-3xl font-bold text-foreground sm:text-5xl">Nová nahrávka</h1>
               <p className="mt-3 max-w-lg text-base leading-7 text-muted-foreground">Spusťte nahrávání rozhovoru. Přepis a stručné shrnutí připravíme automaticky.</p>
 
-              <div className="relative mt-8 flex h-20 items-center justify-center">
+              <div className="relative mt-8 flex size-44 items-center justify-center sm:size-48">
                 {isRecording && (
                   <span
-                    className="absolute size-20 rounded-full bg-destructive/10 transition-transform duration-100 motion-reduce:transform-none"
-                    style={{ transform: `scale(${1 + Math.min(level, 0.6)})` }}
+                    aria-hidden="true"
+                    className="absolute inset-4 rounded-full bg-destructive/15 transition-transform duration-100 motion-reduce:transform-none"
+                    style={{ transform: `scale(${1 + Math.min(level, 0.5) * 0.6})` }}
                   />
                 )}
-                <Button
+                <button
+                  type="button"
                   onClick={() => void (isRecording ? stop() : start())}
-                  className="relative h-16 min-w-60 rounded-lg px-8 text-base font-semibold shadow-lg transition-transform hover:-translate-y-0.5 motion-reduce:transform-none"
-                  variant={isRecording ? "destructive" : "default"}
-                  aria-label={isRecording ? "Zastavit nahrávání" : "Začít nahrávat"}
+                  className={`relative grid size-32 place-items-center rounded-full shadow-[var(--shadow-record)] transition-all duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-card active:scale-95 motion-reduce:transition-none sm:size-36 ${isRecording ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground hover:scale-105"}`}
+                  aria-label={isRecording ? "Zastavit nahrávání" : "Spustit nahrávání"}
+                  aria-pressed={isRecording}
                 >
-                  {isRecording ? <Square className="size-5" aria-hidden="true" /> : <Mic className="size-5" aria-hidden="true" />}
-                  {isRecording ? "Zastavit nahrávání" : "Spustit nahrávání"}
-                </Button>
+                  {isRecording ? <Square className="size-10 fill-current" aria-hidden="true" /> : <Mic className="size-12" aria-hidden="true" />}
+                </button>
               </div>
+              <p className="mt-1 text-sm font-medium text-muted-foreground">{isRecording ? "Klepnutím ukončíte" : "Klepnutím spustíte"}</p>
+              <Waveform level={level} active={isRecording} />
               <p className="mt-5 font-display text-4xl font-bold tabular-nums text-foreground" aria-live="off">
                 {formatDuration(elapsed)}
               </p>
@@ -1653,6 +1678,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                 <p className="mt-3 text-xs text-muted-foreground">
                   Bezpečně uloženo částí: {segmentCount}
                 </p>
+              ) : null}
+              {platformTip && !isRecording ? (
+                <p className="mt-4 max-w-md text-xs leading-5 text-muted-foreground">{platformTip}</p>
               ) : null}
               {backgroundNote ? (
                 <p className="mt-3 max-w-sm text-xs leading-5 text-muted-foreground" aria-live="polite">
