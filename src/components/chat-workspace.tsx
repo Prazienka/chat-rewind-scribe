@@ -551,8 +551,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         ...(resume ? {} : { translation: "", translationParts: [] }),
       });
       const result = await processLongText("/api/translate", source, {
-        payload: { target, source: language },
+        // Zdrojový jazyk server detekuje sám.
+        payload: { target },
         limit: TRANSLATE_CHUNK_CHARS,
+        concurrency: 3,
+        onPartsChange: (parts) => update(rec.id, { translationParts: parts }),
         preserveInputOnFailure: false,
         ...(resume ? { initialParts: rec.translationParts } : {}),
         onPartial: (partial) => update(rec.id, { translation: partial }),
@@ -593,7 +596,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       });
       if (result.failed === 0) toast.success("Překlad je hotový.");
     },
-    [language, update],
+    [update],
   );
 
   // Hlavní zpracování: segmenty → přepis → česká korektura → shrnutí.
