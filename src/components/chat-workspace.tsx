@@ -99,7 +99,7 @@ import {
   type RecordingEvent,
   type RecordingSessionState,
 } from "@/lib/recording-session";
-import { backgroundCapabilityNote } from "@/lib/native-recorder";
+import { addGap, detectPlatform, type Gap } from "@/lib/recording-resilience";
 
 type Recording = {
   id: string;
@@ -130,6 +130,8 @@ type Recording = {
   translationParts?: string[];
   uploadProgress?: number;
   uploadStatus?: "running" | "done" | "error";
+  /** Mezery, kdy systém mikrofon uspal (sekundy od začátku nahrávky). */
+  gaps?: Gap[];
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
@@ -199,6 +201,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [segmentCount, setSegmentCount] = useState(0);
   const [backgroundNote, setBackgroundNote] = useState<string | null>(null);
+  const [platformTip, setPlatformTip] = useState<string | null>(null);
+  const gapsRef = useRef<Gap[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -786,6 +790,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         if (!resume) {
           sessionIdRef.current = crypto.randomUUID();
           segmentsRef.current = [];
+          gapsRef.current = [];
           setSegmentCount(0);
           elapsedBaseRef.current = 0;
           autoStopRequestedRef.current = false;
@@ -869,9 +874,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     recoveringRef.current = true;
     dispatchSession({ type: "recovering", at: Date.now() });
     setBackgroundNote("Obnovuji nahrávání po přerušení. Uložené části zůstávají zachované.");
+    const lostAt = sessionRef.current.lastChunkAt;
     try {
       await queueFlush();
       await teardownGraph();
+      gapsRef.current = addGap(gapsRef.current, lostAt, Date.now(), wavChunksDuration(segmentsRef.current));
       // Čas navážeme na skutečně zaznamenaný zvuk, ne na hodiny na pozadí.
       elapsedBaseRef.current = Math.max(
         wavChunksDuration(segmentsRef.current),
@@ -933,6 +940,23 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     setPending({ duration: seconds, segments: segments.length });
   }, [flushBuffer, teardownGraph]);
 
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+
+  // Pravdivá rada podle platformy (wake lock, instalace na plochu).
+  useEffect(() => {
+    const standalone =
+      window.matchMedia?.("(display-mode: standalone)").matches ||
+      (navigator as { standalone?: boolean }).standalone === true;
+    const info = detectPlatform(navigator.userAgent, standalone);
+    const noWakeLock = !("wakeLock" in navigator);
+    const tips = [
+      info.installHint,
+      noWakeLock ? "Tento prohlížeč neumí držet displej rozsvícený – během nahrávání ho nechte zapnutý." : null,
+    ].filter(Boolean);
+    setPlatformTip(tips.length ? tips.join(" ") : null);
+  }, []);
+
   // Nahrávka se automaticky zastaví na dvou hodinách, aby se stihla bezpečně uložit.
   useEffect(() => {
     if (!isRecording || elapsed < MAX_RECORDING_SECONDS) return;
@@ -958,6 +982,28 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       }
     };
     void requestLock();
+    const platformNote = () =>
+      detectPlatform(
+        navigator.userAgent,
+        window.matchMedia?.("(display-mode: standalone)").matches ||
+          (navigator as { standalone?: boolean }).standalone === true,
+      ).note;
+
+    // Media Session: nahrávání je vidět v ovládání na zamčené obrazovce.
+    const media = (navigator as Navigator & { mediaSession?: MediaSession }).mediaSession;
+    if (media) {
+      try {
+        if (typeof MediaMetadata !== "undefined") {
+          media.metadata = new MediaMetadata({ title: "Probíhá nahrávání", artist: "Chat Scribe" });
+        }
+        media.playbackState = "playing";
+        // Stop z lock screenu je výslovná akce uživatele.
+        media.setActionHandler("stop", () => void stopRef.current?.());
+        media.setActionHandler("pause", () => void stopRef.current?.());
+      } catch {
+        /* nepodporovaná akce */
+      }
+    }
 
     /** Snímá zvuk skutečně dál? */
     const capturing = () =>
@@ -992,7 +1038,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       if (document.visibilityState !== "visible") {
         // Pozadí nahrávku nikdy neukončuje – jen bezpečně odloží nasbíraný zvuk.
         dispatchSession({ type: "background", at: Date.now() });
-        setBackgroundNote(backgroundCapabilityNote(navigator.userAgent));
+        setBackgroundNote(platformNote());
         void queueFlush();
         return;
       }
@@ -1038,6 +1084,16 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       if (!released) {
         released = true;
         void lock?.release().catch(() => {});
+      }
+      if (media) {
+        try {
+          media.playbackState = "none";
+          media.metadata = null;
+          media.setActionHandler("stop", null);
+          media.setActionHandler("pause", null);
+        } catch {
+          /* ignore */
+        }
       }
     };
   }, [isRecording, queueFlush, resumeCapture]);
@@ -1102,7 +1158,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       hasAudio: true,
       audioName: filename,
       group,
+      ...(gapsRef.current.length ? { gaps: gapsRef.current } : {}),
     };
+    gapsRef.current = [];
     persist([entry, ...recordings]);
     void saveSegmentedAudio(id, held.session, filename).catch(() => {
       void saveAudio(id, merged, filename);
