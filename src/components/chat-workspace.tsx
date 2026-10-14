@@ -99,7 +99,7 @@ import {
   type RecordingEvent,
   type RecordingSessionState,
 } from "@/lib/recording-session";
-import { backgroundCapabilityNote } from "@/lib/native-recorder";
+import { addGap, detectPlatform, type Gap } from "@/lib/recording-resilience";
 
 type Recording = {
   id: string;
@@ -130,6 +130,8 @@ type Recording = {
   translationParts?: string[];
   uploadProgress?: number;
   uploadStatus?: "running" | "done" | "error";
+  /** Mezery, kdy systém mikrofon uspal (sekundy od začátku nahrávky). */
+  gaps?: Gap[];
 };
 
 const STORAGE_KEY = "zapisnik.recordings";
@@ -144,6 +146,28 @@ const LANGS = [
   { value: "sk", label: "Slovenština" },
   { value: "de", label: "Němčina" },
 ];
+
+function Waveform({ level, active }: { level: number; active: boolean }) {
+  const [bars, setBars] = useState<number[]>(() => Array.from({ length: 40 }, () => 0));
+  useEffect(() => {
+    if (!active) {
+      setBars((prev) => prev.map(() => 0));
+      return;
+    }
+    setBars((prev) => [...prev.slice(1), Math.min(1, level * 2.2)]);
+  }, [level, active]);
+  return (
+    <div className="mt-6 flex h-12 w-full max-w-sm items-center justify-center gap-[3px]" aria-hidden="true">
+      {bars.map((value, i) => (
+        <span
+          key={i}
+          className={`w-1 rounded-full transition-[height] duration-100 motion-reduce:transition-none ${active ? "bg-destructive/80" : "bg-border"}`}
+          style={{ height: `${Math.max(4, value * 48)}px` }}
+        />
+      ))}
+    </div>
+  );
+}
 
 const recoverInterruptedProcessing = (recording: Recording): Recording => {
   if (
@@ -199,6 +223,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [segmentCount, setSegmentCount] = useState(0);
   const [backgroundNote, setBackgroundNote] = useState<string | null>(null);
+  const [platformTip, setPlatformTip] = useState<string | null>(null);
+  const gapsRef = useRef<Gap[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -551,8 +577,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         ...(resume ? {} : { translation: "", translationParts: [] }),
       });
       const result = await processLongText("/api/translate", source, {
-        payload: { target, source: language },
+        // Zdrojový jazyk server detekuje sám.
+        payload: { target },
         limit: TRANSLATE_CHUNK_CHARS,
+        concurrency: 3,
+        onPartsChange: (parts) => update(rec.id, { translationParts: parts }),
         preserveInputOnFailure: false,
         ...(resume ? { initialParts: rec.translationParts } : {}),
         onPartial: (partial) => update(rec.id, { translation: partial }),
@@ -593,7 +622,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       });
       if (result.failed === 0) toast.success("Překlad je hotový.");
     },
-    [language, update],
+    [update],
   );
 
   // Hlavní zpracování: segmenty → přepis → česká korektura → shrnutí.
@@ -783,6 +812,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         if (!resume) {
           sessionIdRef.current = crypto.randomUUID();
           segmentsRef.current = [];
+          gapsRef.current = [];
           setSegmentCount(0);
           elapsedBaseRef.current = 0;
           autoStopRequestedRef.current = false;
@@ -866,9 +896,11 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     recoveringRef.current = true;
     dispatchSession({ type: "recovering", at: Date.now() });
     setBackgroundNote("Obnovuji nahrávání po přerušení. Uložené části zůstávají zachované.");
+    const lostAt = sessionRef.current.lastChunkAt;
     try {
       await queueFlush();
       await teardownGraph();
+      gapsRef.current = addGap(gapsRef.current, lostAt, Date.now(), wavChunksDuration(segmentsRef.current));
       // Čas navážeme na skutečně zaznamenaný zvuk, ne na hodiny na pozadí.
       elapsedBaseRef.current = Math.max(
         wavChunksDuration(segmentsRef.current),
@@ -930,6 +962,23 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     setPending({ duration: seconds, segments: segments.length });
   }, [flushBuffer, teardownGraph]);
 
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+
+  // Pravdivá rada podle platformy (wake lock, instalace na plochu).
+  useEffect(() => {
+    const standalone =
+      window.matchMedia?.("(display-mode: standalone)").matches ||
+      (navigator as { standalone?: boolean }).standalone === true;
+    const info = detectPlatform(navigator.userAgent, standalone);
+    const noWakeLock = !("wakeLock" in navigator);
+    const tips = [
+      info.installHint,
+      noWakeLock ? "Tento prohlížeč neumí držet displej rozsvícený – během nahrávání ho nechte zapnutý." : null,
+    ].filter(Boolean);
+    setPlatformTip(tips.length ? tips.join(" ") : null);
+  }, []);
+
   // Nahrávka se automaticky zastaví na dvou hodinách, aby se stihla bezpečně uložit.
   useEffect(() => {
     if (!isRecording || elapsed < MAX_RECORDING_SECONDS) return;
@@ -955,6 +1004,28 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       }
     };
     void requestLock();
+    const platformNote = () =>
+      detectPlatform(
+        navigator.userAgent,
+        window.matchMedia?.("(display-mode: standalone)").matches ||
+          (navigator as { standalone?: boolean }).standalone === true,
+      ).note;
+
+    // Media Session: nahrávání je vidět v ovládání na zamčené obrazovce.
+    const media = (navigator as Navigator & { mediaSession?: MediaSession }).mediaSession;
+    if (media) {
+      try {
+        if (typeof MediaMetadata !== "undefined") {
+          media.metadata = new MediaMetadata({ title: "Probíhá nahrávání", artist: "Chat Scribe" });
+        }
+        media.playbackState = "playing";
+        // Stop z lock screenu je výslovná akce uživatele.
+        media.setActionHandler("stop", () => void stopRef.current?.());
+        media.setActionHandler("pause", () => void stopRef.current?.());
+      } catch {
+        /* nepodporovaná akce */
+      }
+    }
 
     /** Snímá zvuk skutečně dál? */
     const capturing = () =>
@@ -989,7 +1060,7 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       if (document.visibilityState !== "visible") {
         // Pozadí nahrávku nikdy neukončuje – jen bezpečně odloží nasbíraný zvuk.
         dispatchSession({ type: "background", at: Date.now() });
-        setBackgroundNote(backgroundCapabilityNote(navigator.userAgent));
+        setBackgroundNote(platformNote());
         void queueFlush();
         return;
       }
@@ -1035,6 +1106,16 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       if (!released) {
         released = true;
         void lock?.release().catch(() => {});
+      }
+      if (media) {
+        try {
+          media.playbackState = "none";
+          media.metadata = null;
+          media.setActionHandler("stop", null);
+          media.setActionHandler("pause", null);
+        } catch {
+          /* ignore */
+        }
       }
     };
   }, [isRecording, queueFlush, resumeCapture]);
@@ -1099,7 +1180,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       hasAudio: true,
       audioName: filename,
       group,
+      ...(gapsRef.current.length ? { gaps: gapsRef.current } : {}),
     };
+    gapsRef.current = [];
     persist([entry, ...recordings]);
     void saveSegmentedAudio(id, held.session, filename).catch(() => {
       void saveAudio(id, merged, filename);
@@ -1559,23 +1642,26 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
               <h1 className="font-display text-3xl font-bold text-foreground sm:text-5xl">Nová nahrávka</h1>
               <p className="mt-3 max-w-lg text-base leading-7 text-muted-foreground">Spusťte nahrávání rozhovoru. Přepis a stručné shrnutí připravíme automaticky.</p>
 
-              <div className="relative mt-8 flex h-20 items-center justify-center">
+              <div className="relative mt-8 flex size-44 items-center justify-center sm:size-48">
                 {isRecording && (
                   <span
-                    className="absolute size-20 rounded-full bg-destructive/10 transition-transform duration-100 motion-reduce:transform-none"
-                    style={{ transform: `scale(${1 + Math.min(level, 0.6)})` }}
+                    aria-hidden="true"
+                    className="absolute inset-4 rounded-full bg-destructive/15 transition-transform duration-100 motion-reduce:transform-none"
+                    style={{ transform: `scale(${1 + Math.min(level, 0.5) * 0.6})` }}
                   />
                 )}
-                <Button
+                <button
+                  type="button"
                   onClick={() => void (isRecording ? stop() : start())}
-                  className="relative h-16 min-w-60 rounded-lg px-8 text-base font-semibold shadow-lg transition-transform hover:-translate-y-0.5 motion-reduce:transform-none"
-                  variant={isRecording ? "destructive" : "default"}
-                  aria-label={isRecording ? "Zastavit nahrávání" : "Začít nahrávat"}
+                  className={`relative grid size-32 place-items-center rounded-full shadow-[var(--shadow-record)] transition-all duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-card active:scale-95 motion-reduce:transition-none sm:size-36 ${isRecording ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground hover:scale-105"}`}
+                  aria-label={isRecording ? "Zastavit nahrávání" : "Spustit nahrávání"}
+                  aria-pressed={isRecording}
                 >
-                  {isRecording ? <Square className="size-5" aria-hidden="true" /> : <Mic className="size-5" aria-hidden="true" />}
-                  {isRecording ? "Zastavit nahrávání" : "Spustit nahrávání"}
-                </Button>
+                  {isRecording ? <Square className="size-10 fill-current" aria-hidden="true" /> : <Mic className="size-12" aria-hidden="true" />}
+                </button>
               </div>
+              <p className="mt-1 text-sm font-medium text-muted-foreground">{isRecording ? "Klepnutím ukončíte" : "Klepnutím spustíte"}</p>
+              <Waveform level={level} active={isRecording} />
               <p className="mt-5 font-display text-4xl font-bold tabular-nums text-foreground" aria-live="off">
                 {formatDuration(elapsed)}
               </p>
@@ -1592,6 +1678,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                 <p className="mt-3 text-xs text-muted-foreground">
                   Bezpečně uloženo částí: {segmentCount}
                 </p>
+              ) : null}
+              {platformTip && !isRecording ? (
+                <p className="mt-4 max-w-md text-xs leading-5 text-muted-foreground">{platformTip}</p>
               ) : null}
               {backgroundNote ? (
                 <p className="mt-3 max-w-sm text-xs leading-5 text-muted-foreground" aria-live="polite">
@@ -1872,9 +1961,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         )}
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-2 border-t border-border bg-background/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden" aria-label="Mobilní navigace">
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-border bg-background/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden" aria-label="Mobilní navigace">
         <Button variant={mode === "recorder" ? "secondary" : "ghost"} className="h-14 flex-col gap-1 text-xs" asChild><Link to="/"><Mic aria-hidden="true" />Nahrávání</Link></Button>
         <Button variant={mode === "library" ? "secondary" : "ghost"} className="h-14 flex-col gap-1 text-xs" asChild><Link to="/transcripts"><Library aria-hidden="true" />Knihovna{processingCount > 0 ? <span className="sr-only">, {processingCount} se zpracovává</span> : null}</Link></Button>
+        <Button variant="ghost" className="h-14 flex-col gap-1 text-xs" asChild><Link to="/" hash="nastaveni"><Settings2 aria-hidden="true" />Nastavení</Link></Button>
       </nav>
 
       {showBack && (

@@ -13,8 +13,19 @@ const LANG_NAMES: Record<string, string> = {
   it: "italštiny",
 };
 
-const OPENAI_MODEL = "gpt-5-mini";
 const MAX_CHARS = 12_000;
+/** Jak dlouho čekáme na začátek odpovědi jednoho poskytovatele. */
+const CONNECT_TIMEOUT_MS = 45_000;
+const ATTEMPTS_PER_PROVIDER = 2;
+
+type Provider = {
+  name: "openai" | "lovable";
+  url: string;
+  key: string;
+  model: string;
+};
+
+type Failure = { provider: Provider["name"]; status: number; message: string };
 
 const json = (status: number, error: string) =>
   new Response(JSON.stringify({ error }), {
@@ -22,22 +33,80 @@ const json = (status: number, error: string) =>
     headers: { "Content-Type": "application/json" },
   });
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function describe(provider: Provider["name"], status: number, detail: string): string {
+  const who = provider === "openai" ? "OpenAI" : "Vestavěná AI";
+  if (status === 0) return `${who}: neodpovídá (vypršel čas).`;
+  if (status === 401) return `${who}: neplatný nebo chybějící klíč.`;
+  if (status === 402 || /insufficient_quota|billing|credit/i.test(detail))
+    return `${who}: došel kredit.`;
+  if (status === 403) return `${who}: přístup odmítnut.`;
+  if (status === 429) return `${who}: příliš mnoho požadavků.`;
+  if (status >= 500) return `${who}: služba je dočasně nedostupná.`;
+  return `${who}: chyba ${status}.`;
+}
+
+async function callProvider(
+  provider: Provider,
+  instructions: string,
+  text: string,
+  signal: AbortSignal,
+): Promise<Response | Failure> {
+  let last: Failure = { provider: provider.name, status: 0, message: describe(provider.name, 0, "") };
+  for (let attempt = 1; attempt <= ATTEMPTS_PER_PROVIDER; attempt++) {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener("abort", abort);
+    const timer = setTimeout(abort, CONNECT_TIMEOUT_MS);
+    try {
+      const response = await fetch(provider.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${provider.key}`,
+          ...(provider.name === "lovable" ? { "X-Lovable-AIG-SDK": "fetch" } : {}),
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          stream: true,
+          store: false,
+          reasoning: { effort: "low" },
+          instructions,
+          input: text,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (response.ok && response.body) return response;
+      const detail = await response.text().catch(() => "");
+      console.error(`[translate] ${provider.name} ${response.status}: ${detail.slice(0, 300)}`);
+      last = { provider: provider.name, status: response.status, message: describe(provider.name, response.status, detail) };
+      // Klíč, kredit ani přístup se opakováním nespraví – rovnou zkusíme dalšího poskytovatele.
+      const quota = /insufficient_quota|billing/i.test(detail);
+      if ([400, 401, 402, 403, 404].includes(response.status) || quota) return last;
+    } catch (error) {
+      clearTimeout(timer);
+      if (signal.aborted) throw error;
+      console.error(`[translate] ${provider.name} network/timeout`, error);
+      last = { provider: provider.name, status: 0, message: describe(provider.name, 0, "") };
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
+    if (attempt < ATTEMPTS_PER_PROVIDER) await sleep(attempt * 1000 + Math.random() * 500);
+  }
+  return last;
+}
+
 export const Route = createFileRoute("/api/translate")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const key = process.env["OPENAI_API_KEY"];
-        if (!key) {
-          return json(
-            401,
-            "Překlad není nastaven: chybí klíč OpenAI (OPENAI_API_KEY) v nastavení projektu.",
-          );
-        }
-
         const body = (await request.json().catch(() => null)) as {
           text?: string;
           target?: string;
           source?: string;
+          preferred?: string;
         } | null;
         const text = body?.text?.trim();
         if (!text) return json(400, "Přepis je prázdný, není co přeložit.");
@@ -46,7 +115,9 @@ export const Route = createFileRoute("/api/translate")({
         }
         const target = LANG_NAMES[body?.target ?? "en"] ?? "angličtiny";
         const sourceName = body?.source ? LANG_NAMES[body.source] : undefined;
-        const from = sourceName ? ` z ${sourceName}` : "";
+        const from = sourceName
+          ? ` z ${sourceName}`
+          : " (zdrojový jazyk sám rozpoznej)";
 
         const instructions = `Jsi profesionální překladatel. Přelož dodaný úryvek přepisu rozhovoru${from} do ${target}.
 
@@ -58,53 +129,43 @@ Pravidla:
 - Pokud je text už v cílovém jazyce, vrať ho beze změny.
 - Odpověz POUZE přeloženým textem.`;
 
-        let response: Response;
-        try {
-          response = await fetch("https://api.openai.com/v1/responses", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${key}`,
-            },
-            body: JSON.stringify({
-              model: OPENAI_MODEL,
-              stream: true,
-              store: false,
-              reasoning: { effort: "low" },
-              instructions,
-              input: text,
-            }),
-            signal: request.signal,
-          });
-        } catch (error) {
-          if ((error as Error)?.name === "AbortError") return new Response(null, { status: 499 });
-          console.error("Translate network error", error);
-          return json(502, "Nepodařilo se spojit se službou OpenAI. Zkuste to prosím znovu.");
+        const providers: Provider[] = [];
+        const openaiKey = process.env["OPENAI_API_KEY"];
+        const lovableKey = process.env["LOVABLE_API_KEY"];
+        if (openaiKey)
+          providers.push({ name: "openai", url: "https://api.openai.com/v1/responses", key: openaiKey, model: "gpt-5-mini" });
+        if (lovableKey)
+          providers.push({ name: "lovable", url: "https://ai.gateway.lovable.dev/v1/responses", key: lovableKey, model: "openai/gpt-6-astra" });
+        if (body?.preferred === "lovable") providers.reverse();
+        if (providers.length === 0) {
+          return json(401, "Překlad není nastavený: chybí klíč k AI službě.");
         }
 
-        if (!response.ok || !response.body) {
-          const detail = await response.text().catch(() => "");
-          console.error(`OpenAI translate failed [${response.status}]: ${detail.slice(0, 500)}`);
-          const quota = /insufficient_quota|billing/i.test(detail);
-          const message =
-            response.status === 401
-              ? "Klíč OpenAI je neplatný. Zkontrolujte OPENAI_API_KEY v nastavení projektu."
-              : response.status === 403
-                ? "OpenAI odmítlo přístup k modelu pro tento klíč."
-                : response.status === 429 && quota
-                  ? "Na účtu OpenAI došel kredit nebo limit. Doplňte ho v OpenAI a zkuste to znovu."
-                  : response.status === 429
-                    ? "Příliš mnoho požadavků na OpenAI, zkuste to prosím za chvíli."
-                    : response.status >= 500
-                      ? "Služba OpenAI je momentálně nedostupná."
-                      : `Překlad se nepodařil (${response.status}).`;
-          // Vyčerpaná kvóta se opakováním nespraví → hlásíme jako trvalou chybu (402).
-          return json(quota ? 402 : response.status, message);
+        const failures: Failure[] = [];
+        for (const provider of providers) {
+          let result: Response | Failure;
+          try {
+            result = await callProvider(provider, instructions, text, request.signal);
+          } catch {
+            return new Response(null, { status: 499 });
+          }
+          if (result instanceof Response) {
+            return new Response(result.body, {
+              headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache, no-transform",
+                "X-Translate-Provider": provider.name,
+              },
+            });
+          }
+          failures.push(result);
         }
 
-        return new Response(response.body, {
-          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform" },
-        });
+        // Selhali všichni poskytovatelé – vrátíme konkrétní důvody.
+        const message = `Překlad se nepodařil. ${failures.map((f) => f.message).join(" ")}`;
+        const transient = failures.some((f) => f.status === 0 || f.status === 429 || f.status >= 500);
+        const status = transient ? 503 : failures.some((f) => f.status === 402) ? 402 : 502;
+        return json(status, message);
       },
     },
   },

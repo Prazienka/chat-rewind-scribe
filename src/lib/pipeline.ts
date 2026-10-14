@@ -11,7 +11,7 @@ export type StageProgress = {
 
 const MAX_ATTEMPTS = 3;
 const TEXT_CHUNK_CHARS = 8000;
-export const TRANSLATE_CHUNK_CHARS = 3000;
+export const TRANSLATE_CHUNK_CHARS = 2000;
 const TRANSCRIBE_TIMEOUT_MS = 90_000;
 const TEXT_STALL_MS = 120_000;
 
@@ -262,6 +262,9 @@ export async function processLongText(
     limit?: number;
     preserveInputOnFailure?: boolean;
     initialParts?: string[];
+    /** Kolik částí zpracovávat najednou (pořadí výsledku zůstává zachované). */
+    concurrency?: number;
+    onPartsChange?: (parts: string[]) => void;
     onPartial?: (text: string) => void;
     onProgress?: (progress: StageProgress) => void;
   } = {},
@@ -300,31 +303,48 @@ export async function processLongText(
   };
 
   let terminal = false;
-  for (let index = 0; index < source.length; index++) {
-    const part = source[index];
-    if (!part) continue;
-    if (results[index]?.trim()) {
-      report(index + 1);
-      continue;
+  let completed = 0;
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 1, 4));
+  const live: string[] = source.map(() => "");
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < source.length) {
+      const index = cursor++;
+      const part = source[index];
+      if (!part || results[index]?.trim()) {
+        completed++;
+        report(completed);
+        continue;
+      }
+      if (terminal) {
+        failedIndexes.push(index);
+        completed++;
+        continue;
+      }
+      const outcome = await runTextChunk(endpoint, part, options.payload, (output) => {
+        live[index] = output;
+        const preview = results
+          .map((value, i) => (value.trim() ? value : live[i] ?? ""))
+          .filter(Boolean)
+          .join("\n\n");
+        options.onPartial?.(preview);
+      });
+      if (outcome.text) {
+        results[index] = outcome.text;
+        // Hotová část se hned předá ven k uložení, aby se při chybě neztratila.
+        options.onPartsChange?.([...results]);
+      } else {
+        failedIndexes.push(index);
+        lastError = outcome.error ?? lastError;
+        if (outcome.terminal) terminal = true;
+      }
+      completed++;
+      report(completed);
+      await sleep(0);
     }
-    if (terminal) {
-      failedIndexes.push(index);
-      continue;
-    }
-    const outcome = await runTextChunk(endpoint, part, options.payload, (output) => {
-      const preview = [...results.slice(0, index), output].filter(Boolean).join("\n\n");
-      options.onPartial?.(preview);
-    });
-    if (outcome.text) {
-      results[index] = outcome.text;
-    } else {
-      failedIndexes.push(index);
-      lastError = outcome.error ?? lastError;
-      if (outcome.terminal) terminal = true;
-    }
-    report(index + 1);
-    await sleep(0);
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, source.length) }, worker));
+  failedIndexes.sort((a, b) => a - b);
 
   return {
     text: joined(),
