@@ -31,7 +31,6 @@ export const Route = createFileRoute("/api/translate")({
           text?: string;
           target?: string;
           source?: string;
-          preferred?: string;
         } | null;
         const text = body?.text?.trim();
         if (!text) return json(400, "Přepis je prázdný, není co přeložit.");
@@ -54,9 +53,9 @@ Pravidla:
 - Pokud je text už v cílovém jazyce, vrať ho beze změny.
 - Odpověz POUZE přeloženým textem.`;
 
-        const providers = providersFromEnv(process.env, body?.preferred);
+        const providers = providersFromEnv(process.env);
         if (providers.length === 0) {
-          return json(401, "Překlad není nastavený: chybí klíč k AI službě.");
+          return json(401, "Překlad není nastavený: na serveru chybí klíč OpenAI (OPENAI_API_KEY).");
         }
 
         let result: Awaited<ReturnType<typeof translateWithFallback>>;

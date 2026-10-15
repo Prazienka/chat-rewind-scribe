@@ -2,7 +2,6 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -140,17 +139,18 @@ function AuthPage() {
     setBusy(true);
     try {
       saveRemember();
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
+      // Přihlášení přes Google přímo v Supabase: prohlížeč odejde na Google
+      // a po potvrzení se vrátí na úvodní stránku už přihlášený.
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.origin },
       });
-      if (result.error) {
-        console.error("Google sign-in error:", result.error);
-        const { title, hint } = googleError(result.error);
+      if (error) {
+        console.error("Google sign-in error:", error);
+        const { title, hint } = googleError(error);
         toast.error(title, { description: hint, duration: 12000 });
         return;
       }
-      if (result.redirected) return;
-      void navigate({ to: "/" });
     } catch (err) {
       console.error("Google sign-in threw:", err);
       const { title, hint } = googleError(err);

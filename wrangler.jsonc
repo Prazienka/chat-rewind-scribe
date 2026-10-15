@@ -1,0 +1,15 @@
+// Nasazení na Cloudflare Workers. Build: `npm run build`, nasazení: `npm run deploy`
+// (nebo automaticky z GitHubu přes Cloudflare Workers Builds).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chat-scribe",
+  "main": ".output/server/index.mjs",
+  "compatibility_date": "2026-10-01",
+  // process.env v serverovém kódu se plní z proměnných a tajných klíčů workeru.
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".output/public",
+    "binding": "ASSETS"
+  },
+  "observability": { "enabled": true }
+}

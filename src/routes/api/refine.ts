@@ -1,5 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import {
+  OPENAI_BASE_URL,
+  clientStatus,
+  describeOpenAIError,
+  missingKeyResponse,
+  openaiHeaders,
+  responsesBody,
+  textModel,
+} from "@/lib/openai";
+
 const SYSTEM = `Jsi korektor českých přepisů mluveného slova. Dostaneš hrubý strojový přepis rozhovoru a vrátíš jeho opravenou verzi.
 
 Pravidla:
@@ -17,13 +27,8 @@ export const Route = createFileRoute("/api/refine")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const key = process.env["LOVABLE_API_KEY"];
-        if (!key) {
-          return new Response(JSON.stringify({ error: "Chybí konfigurace AI klíče." }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
+        const key = process.env["OPENAI_API_KEY"];
+        if (!key) return missingKeyResponse();
 
         const body = (await request.json().catch(() => null)) as {
           text?: string;
@@ -37,36 +42,19 @@ export const Route = createFileRoute("/api/refine")({
           });
         }
 
-        const response = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
+        const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Lovable-API-Key": key,
-            "X-Lovable-AIG-SDK": "fetch",
-          },
-          body: JSON.stringify({
-            model: "openai/gpt-6-astra",
-            stream: true,
-            reasoning: { effort: "medium", summary: "auto" },
-            include: ["reasoning.encrypted_content"],
-            input: [
-              { role: "system", content: [{ type: "input_text", text: SYSTEM }] },
-              { role: "user", content: [{ type: "input_text", text }] },
-            ],
-          }),
+          headers: openaiHeaders(key),
+          body: responsesBody(textModel(process.env), SYSTEM, text, "medium"),
+          signal: request.signal,
         });
 
         if (!response.ok || !response.body) {
           const detail = await response.text().catch(() => "");
           console.error(`Refine failed [${response.status}]: ${detail}`);
-          const message =
-            response.status === 402
-              ? "Na pracovním prostoru chybí AI kredity."
-              : response.status === 429
-                ? "Příliš mnoho požadavků, zkuste to prosím za chvíli."
-                : `Zpřesnění přepisu se nepodařilo (${response.status}).`;
+          const message = describeOpenAIError(response.status, detail, "Zpřesnění přepisu");
           return new Response(JSON.stringify({ error: message }), {
-            status: response.status,
+            status: clientStatus(response.status, detail),
             headers: { "Content-Type": "application/json" },
           });
         }

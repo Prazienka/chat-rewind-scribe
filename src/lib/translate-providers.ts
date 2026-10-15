@@ -1,9 +1,11 @@
 /**
- * Volání AI poskytovatelů pro překlad s automatickým přepnutím na další,
- * když první selže. Bez závislosti na routeru, aby šlo logiku testovat.
+ * Překlad přes OpenAI s automatickým přepnutím na záložní model, když hlavní
+ * selže. Bez závislosti na routeru, aby šlo logiku testovat.
  */
 
-export type ProviderName = "openai" | "lovable";
+import { OPENAI_BASE_URL, fallbackTextModel, supportsReasoning, textModel } from "./openai";
+
+export type ProviderName = "primary" | "fallback";
 
 export type Provider = {
   name: ProviderName;
@@ -30,36 +32,20 @@ type Options = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Poskytovatelé podle dostupných klíčů. OpenAI má přednost, vestavěná AI je záloha. */
-export function providersFromEnv(
-  env: Record<string, string | undefined>,
-  preferred?: string,
-): Provider[] {
-  const providers: Provider[] = [];
-  const openaiKey = env["OPENAI_API_KEY"];
-  const lovableKey = env["LOVABLE_API_KEY"];
-  if (openaiKey) {
-    providers.push({
-      name: "openai",
-      url: "https://api.openai.com/v1/responses",
-      key: openaiKey,
-      model: "gpt-5-mini",
-    });
-  }
-  if (lovableKey) {
-    providers.push({
-      name: "lovable",
-      url: "https://ai.gateway.lovable.dev/v1/responses",
-      key: lovableKey,
-      model: "openai/gpt-6-astra",
-    });
-  }
-  if (preferred === "lovable") providers.reverse();
+/** Hlavní a záložní model OpenAI. Bez klíče není s čím překládat. */
+export function providersFromEnv(env: Record<string, string | undefined>): Provider[] {
+  const key = env["OPENAI_API_KEY"];
+  if (!key) return [];
+  const url = `${OPENAI_BASE_URL}/responses`;
+  const primary = textModel(env);
+  const fallback = fallbackTextModel(env);
+  const providers: Provider[] = [{ name: "primary", url, key, model: primary }];
+  if (fallback && fallback !== primary) providers.push({ name: "fallback", url, key, model: fallback });
   return providers;
 }
 
 export function describeFailure(provider: ProviderName, status: number, detail: string): string {
-  const who = provider === "openai" ? "OpenAI" : "Vestavěná AI";
+  const who = provider === "primary" ? "OpenAI" : "OpenAI (záložní model)";
   if (status === 0) return `${who}: neodpovídá (vypršel čas).`;
   if (status === 401) return `${who}: neplatný nebo chybějící klíč.`;
   if (status === 402 || /insufficient_quota|billing|credit/i.test(detail)) {
@@ -99,13 +85,12 @@ async function callProvider(
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${provider.key}`,
-          ...(provider.name === "lovable" ? { "X-Lovable-AIG-SDK": "fetch" } : {}),
         },
         body: JSON.stringify({
           model: provider.model,
           stream: true,
           store: false,
-          reasoning: { effort: "low" },
+          ...(supportsReasoning(provider.model) ? { reasoning: { effort: "low" } } : {}),
           instructions,
           input: text,
         }),
@@ -120,8 +105,9 @@ async function callProvider(
         status: response.status,
         message: describeFailure(provider.name, response.status, detail),
       };
-      // Klíč, kredit ani přístup se opakováním nespraví – rovnou zkusíme dalšího poskytovatele.
+      // Klíč, kredit ani přístup se opakováním nespraví – rovnou zkusíme záložní model.
       const quota = /insufficient_quota|billing/i.test(detail);
+      if (quota) last = { ...last, status: 402 };
       if ([400, 401, 402, 403, 404].includes(response.status) || quota) return last;
     } catch (error) {
       clearTimeout(timer);

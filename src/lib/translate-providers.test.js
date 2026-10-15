@@ -25,71 +25,82 @@ const options = (fetchImpl) => ({
   backoff: () => 0,
 });
 
-const BOTH = providersFromEnv({ OPENAI_API_KEY: "sk-test", LOVABLE_API_KEY: "lv-test" });
+const BOTH = providersFromEnv({
+  OPENAI_API_KEY: "sk-test",
+  OPENAI_TEXT_MODEL: "gpt-5-mini",
+  OPENAI_FALLBACK_MODEL: "gpt-4.1-mini",
+});
 
-describe("překlad – záložní poskytovatel", () => {
-  it("bez klíče OpenAI použije jen vestavěnou AI", () => {
-    const providers = providersFromEnv({ LOVABLE_API_KEY: "lv-test" });
-    expect(providers.map((p) => p.name)).toEqual(["lovable"]);
+const modelOf = (init) => JSON.parse(String(init.body)).model;
+
+describe("překlad – záložní model", () => {
+  it("bez klíče OpenAI nemá s čím překládat", () => {
+    expect(providersFromEnv({})).toEqual([]);
   });
 
-  it("OpenAI má přednost, preferred=lovable pořadí otočí", () => {
-    expect(BOTH.map((p) => p.name)).toEqual(["openai", "lovable"]);
-    const reversed = providersFromEnv({ OPENAI_API_KEY: "a", LOVABLE_API_KEY: "b" }, "lovable");
-    expect(reversed.map((p) => p.name)).toEqual(["lovable", "openai"]);
+  it("hlavní model má přednost, záložní je druhý", () => {
+    expect(BOTH.map((p) => p.model)).toEqual(["gpt-5-mini", "gpt-4.1-mini"]);
   });
 
-  it("když OpenAI nemá kredit, odpoví vestavěná AI", async () => {
-    const fetchImpl = vi.fn(async (url) =>
-      String(url).includes("openai.com")
-        ? failure(429, '{"error":{"code":"insufficient_quota"}}')
-        : stream(),
+  it("parametr reasoning posílá jen modelům, které ho umí", async () => {
+    const bodies = [];
+    const fetchImpl = vi.fn(async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return modelOf(init) === "gpt-5-mini" ? failure(404) : stream();
+    });
+    await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
+    expect(bodies[0].reasoning).toEqual({ effort: "low" });
+    expect(bodies[1].reasoning).toBeUndefined();
+  });
+
+  it("když hlavní model selže, odpoví záložní", async () => {
+    const fetchImpl = vi.fn(async (_url, init) =>
+      modelOf(init) === "gpt-5-mini" ? failure(403) : stream(),
     );
     const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
     expect(result.ok).toBe(true);
-    expect(result.provider).toBe("lovable");
-    // Vyčerpaná kvóta se neopakuje: 1× OpenAI, 1× záloha.
+    expect(result.provider).toBe("fallback");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("dočasnou chybu zkusí u stejného poskytovatele znovu", async () => {
+  it("dočasnou chybu zkusí u stejného modelu znovu", async () => {
     let calls = 0;
     const fetchImpl = vi.fn(async () => (++calls === 1 ? failure(503) : stream()));
     const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
     expect(result.ok).toBe(true);
-    expect(result.provider).toBe("openai");
+    expect(result.provider).toBe("primary");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("výpadek sítě u prvního poskytovatele přepne na druhého", async () => {
-    const fetchImpl = vi.fn(async (url) => {
-      if (String(url).includes("openai.com")) throw new TypeError("fetch failed");
+  it("výpadek sítě u hlavního modelu přepne na záložní", async () => {
+    const fetchImpl = vi.fn(async (_url, init) => {
+      if (modelOf(init) === "gpt-5-mini") throw new TypeError("fetch failed");
       return stream();
     });
     const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
     expect(result.ok).toBe(true);
-    expect(result.provider).toBe("lovable");
+    expect(result.provider).toBe("fallback");
   });
 
-  it("když selžou oba, vrátí konkrétní důvody a správný stav", async () => {
-    const fetchImpl = vi.fn(async (url) =>
-      String(url).includes("openai.com") ? failure(401) : failure(402),
-    );
+  it("vyčerpaný kredit se neopakuje a hlásí se jako 402", async () => {
+    const fetchImpl = vi.fn(async () => failure(429, '{"error":{"code":"insufficient_quota"}}'));
     const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
     expect(result.ok).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(result.failures.map((f) => f.message)).toEqual([
-      "OpenAI: neplatný nebo chybějící klíč.",
-      "Vestavěná AI: došel kredit.",
+      "OpenAI: došel kredit.",
+      "OpenAI (záložní model): došel kredit.",
     ]);
     expect(failureStatus(result.failures)).toBe(402);
   });
 
-  it("přetížení u obou se hlásí jako dočasná chyba (klient zkusí znovu)", () => {
-    expect(
-      failureStatus([
-        { provider: "openai", status: 429, message: "" },
-        { provider: "lovable", status: 401, message: "" },
-      ]),
-    ).toBe(503);
+  it("zrušený požadavek už další model nevolá", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchImpl = vi.fn(async () => stream());
+    await expect(
+      translateWithFallback(BOTH, "přelož", "Ahoj", { signal: controller.signal, fetchImpl, backoff: () => 0 }),
+    ).rejects.toBeTruthy();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import {
+  OPENAI_BASE_URL,
+  clientStatus,
+  describeOpenAIError,
+  missingKeyResponse,
+  transcribeModel,
+} from "@/lib/openai";
+
 // Klient posílá zvuk po segmentech (max ~4 minuty, 16 kHz mono ≈ 8 MB).
 // Limit je proto nastavený s rezervou, ne jako strop délky nahrávky.
 const MAX_BYTES = 30 * 1024 * 1024;
@@ -8,13 +16,8 @@ export const Route = createFileRoute("/api/transcribe")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const key = process.env["LOVABLE_API_KEY"];
-        if (!key) {
-          return new Response(JSON.stringify({ error: "Chybí konfigurace AI klíče." }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
+        const key = process.env["OPENAI_API_KEY"];
+        if (!key) return missingKeyResponse();
 
         const form = await request.formData();
         const file = form.get("file");
@@ -53,19 +56,19 @@ export const Route = createFileRoute("/api/transcribe")({
           ? file.name.split(".").pop()!.toLowerCase()
           : undefined;
         const ext = extByType[type] ?? nameExt ?? "wav";
-        // Gemini rejects video/* parts, even when the container is audio-only.
+        // Část služeb odmítá video/* i u čistě zvukového kontejneru.
         const audioType = type.startsWith("video/") ? type.replace("video/", "audio/") : type;
         const payload = new Blob([await file.arrayBuffer()], { type: audioType });
 
         const upstream = new FormData();
-        upstream.append("model", "google/gemini-3.5-transcribe");
+        upstream.append("model", transcribeModel(process.env));
         upstream.append("file", payload, `recording.${ext}`);
         upstream.append("stream", "true");
         if (typeof language === "string" && language && language !== "auto") {
           upstream.append("language", language);
         }
 
-        const response = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {
+        const response = await fetch(`${OPENAI_BASE_URL}/audio/transcriptions`, {
           method: "POST",
           headers: { Authorization: `Bearer ${key}` },
           body: upstream,
@@ -74,14 +77,9 @@ export const Route = createFileRoute("/api/transcribe")({
         if (!response.ok || !response.body) {
           const detail = await response.text().catch(() => "");
           console.error(`Transcription failed [${response.status}]: ${detail}`);
-          const message =
-            response.status === 402
-              ? "Na pracovním prostoru chybí AI kredity."
-              : response.status === 429
-                ? "Příliš mnoho požadavků, zkuste to prosím za chvíli."
-                : `Přepis se nepodařil (${response.status}).`;
-          return new Response(JSON.stringify({ error: message, detail }), {
-            status: response.status,
+          const message = describeOpenAIError(response.status, detail, "Přepis");
+          return new Response(JSON.stringify({ error: message }), {
+            status: clientStatus(response.status, detail),
             headers: { "Content-Type": "application/json" },
           });
         }
