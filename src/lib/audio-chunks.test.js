@@ -29,7 +29,8 @@ describe("long recording audio chunks", () => {
     const checkpoint = new Float32Array(TARGET_RATE * RECORDING_CHECKPOINT_SECONDS);
     checkpoint.fill(0.1);
     const saved = pcmToWavChunks(
-      Array.from({ length: 20 }, () => checkpoint),
+      // 10 minut zvuku bez ohledu na to, jak často se ukládá (dřív 30 s, teď 8 s).
+      Array.from({ length: Math.round(600 / RECORDING_CHECKPOINT_SECONDS) }, () => checkpoint),
       TARGET_RATE,
       RECORDING_CHECKPOINT_SECONDS,
     );

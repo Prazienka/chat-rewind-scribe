@@ -1,16 +1,12 @@
 // Nasazení na Cloudflare Workers. Build: `npm run build`, nasazení: `npm run deploy`
+// Vstupní soubor a statické soubory doplní Nitro při buildu (.output/server/wrangler.json).
 // (nebo automaticky z GitHubu přes Cloudflare Workers Builds).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "chat-scribe",
-  "main": ".output/server/index.mjs",
   "compatibility_date": "2026-10-01",
   // process.env v serverovém kódu se plní z proměnných a tajných klíčů workeru.
   "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": ".output/public",
-    "binding": "ASSETS"
-  },
   // Veřejné údaje Supabase pro server. OPENAI_API_KEY se zadává jako tajný klíč
   // (Cloudflare → Worker → Settings → Variables and Secrets), nikdy sem.
   "vars": {
