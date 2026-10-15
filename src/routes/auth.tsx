@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { AudioLines, ChevronLeft, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -162,77 +162,103 @@ function AuthPage() {
 
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-background px-5 py-12">
-      <Card className="w-full max-w-sm border-border/70 p-6">
-        <h1 className="font-display text-2xl text-foreground">
-          {mode === "in" ? "Přihlášení" : "Vytvořit účet"}
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Nahrávky, přepisy i shrnutí se pak samy synchronizují mezi vašimi zařízeními.
-        </p>
+    <div className="min-h-dvh bg-background px-4 pb-12 pt-[max(1rem,env(safe-area-inset-top))]">
+      <div className="mx-auto w-full max-w-sm">
+        <Link to="/" className="press -ml-2 inline-flex h-11 items-center gap-0.5 rounded-full pl-1 pr-3 text-[1.0625rem] text-primary">
+          <ChevronLeft className="size-6" aria-hidden="true" /> Zpět
+        </Link>
 
-        <form className="mt-6 space-y-4" onSubmit={submit}>
-          <div className="space-y-1.5">
-            <Label htmlFor="email">E-mail</Label>
-            <Input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password">Heslo</Label>
-            <Input
-              id="password"
-              type="password"
-              required
-              minLength={6}
-              autoComplete={mode === "in" ? "current-password" : "new-password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-primary"
-              checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
-            />
-            Zapamatovat si mě a zůstat přihlášen
-          </label>
-          <Button type="submit" className="w-full" disabled={busy}>
-            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {mode === "in" ? "Přihlásit se" : "Zaregistrovat se"}
-          </Button>
-        </form>
+        <div className="mt-6 flex flex-col items-center text-center">
+          <span className="grid size-16 place-items-center rounded-[1.125rem] bg-record text-white shadow-[0_8px_24px_-8px_var(--record)]">
+            <AudioLines className="size-8" aria-hidden="true" />
+          </span>
+          <h1 className="large-title mt-5 text-foreground">{mode === "in" ? "Přihlášení" : "Nový účet"}</h1>
+          <p className="footnote mt-2 max-w-xs text-[0.9375rem]">
+            Nahrávky, přepisy i shrnutí se pak samy synchronizují mezi vašimi zařízeními.
+          </p>
+        </div>
 
-        <Button
-          variant="outline"
-          className="mt-3 w-full"
+        <button
+          type="button"
+          className="press mt-8 flex h-12 w-full items-center justify-center gap-2.5 rounded-[0.875rem] bg-foreground text-[1.0625rem] font-semibold text-background disabled:opacity-40"
           disabled={busy}
           onClick={() => void google()}
         >
-          Pokračovat s Google
-        </Button>
+          <svg viewBox="0 0 24 24" className="size-5" aria-hidden="true">
+            <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.9-5.5 3.9-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.3 14.6 2.3 12 2.3 6.7 2.3 2.4 6.6 2.4 12s4.3 9.7 9.6 9.7c5.5 0 9.2-3.9 9.2-9.4 0-.6-.1-1.1-.2-1.6H12z" />
+          </svg>
+          Pokračovat s Googlem
+        </button>
 
+        <div className="my-6 flex items-center gap-3 footnote">
+          <span className="h-px flex-1 bg-separator" />
+          nebo e-mailem
+          <span className="h-px flex-1 bg-separator" />
+        </div>
 
-        <Button
+        <form onSubmit={submit}>
+          <div className="grouped">
+            <label className="grouped-row flex min-h-11 items-center gap-3 px-4">
+              <span className="w-16 shrink-0 text-[1.0625rem] text-foreground">E-mail</span>
+              <input
+                id="email"
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="jmeno@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="h-11 min-w-0 flex-1 bg-transparent text-[1.0625rem] text-foreground outline-none placeholder:text-muted-foreground/70"
+              />
+            </label>
+            <label className="grouped-row flex min-h-11 items-center gap-3 px-4">
+              <span className="w-16 shrink-0 text-[1.0625rem] text-foreground">Heslo</span>
+              <input
+                id="password"
+                type="password"
+                required
+                minLength={6}
+                autoComplete={mode === "in" ? "current-password" : "new-password"}
+                placeholder={mode === "in" ? "Vaše heslo" : "Alespoň 6 znaků"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="h-11 min-w-0 flex-1 bg-transparent text-[1.0625rem] text-foreground outline-none placeholder:text-muted-foreground/70"
+              />
+            </label>
+            <label className="grouped-row flex min-h-11 items-center justify-between gap-3 px-4">
+              <span className="text-[1.0625rem] text-foreground">Zůstat přihlášen</span>
+              <input
+                type="checkbox"
+                role="switch"
+                className="peer sr-only"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+              />
+              <span
+                aria-hidden="true"
+                className="relative h-[1.9375rem] w-[3.1875rem] shrink-0 rounded-full bg-fill transition-colors duration-200 peer-checked:bg-success peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-ring after:absolute after:left-[2px] after:top-[2px] after:size-[1.6875rem] after:rounded-full after:bg-white after:shadow-[0_3px_8px_rgb(0_0_0/0.15),0_1px_1px_rgb(0_0_0/0.16)] after:transition-transform after:duration-200 after:ease-[var(--ease-ios)] peer-checked:after:translate-x-[1.25rem]"
+              />
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            className="press mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-[0.875rem] bg-primary text-[1.0625rem] font-semibold text-primary-foreground disabled:opacity-40"
+            disabled={busy}
+          >
+            {busy ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : null}
+            {mode === "in" ? "Přihlásit se" : "Vytvořit účet"}
+          </button>
+        </form>
+
+        <button
           type="button"
-          variant="link"
-          className="mt-3 h-11 w-full text-muted-foreground"
+          className="press mt-4 h-11 w-full rounded-full text-[0.9375rem] text-primary"
           onClick={() => setMode(mode === "in" ? "up" : "in")}
         >
           {mode === "in" ? "Nemáte účet? Zaregistrujte se" : "Už máte účet? Přihlaste se"}
-        </Button>
-
-        <Link to="/" className="mt-4 block text-center text-xs text-muted-foreground">
-          Zpět do aplikace
-        </Link>
-      </Card>
+        </button>
+      </div>
     </div>
   );
 }

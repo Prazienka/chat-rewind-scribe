@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import {
   Check,
   Copy,
@@ -16,7 +16,7 @@ import {
   X,
   Languages,
   RotateCcw,
-  ArrowLeft,
+  ChevronLeft,
   CalendarDays,
   Clock3,
   PauseCircle,
@@ -151,10 +151,10 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   }, [query, text]);
 
   return (
-    <p className="whitespace-pre-wrap text-[0.9375rem] leading-7 text-foreground">
+    <p className="whitespace-pre-wrap text-[1.0625rem] leading-[1.6] text-foreground">
       {parts.map((part, index) =>
         query.trim() && part.toLocaleLowerCase("cs").includes(query.trim().toLocaleLowerCase("cs")) ? (
-          <mark key={`${part}-${index}`} className="rounded-sm bg-accent px-0.5 text-accent-foreground">
+          <mark key={`${part}-${index}`} className="rounded-[0.25rem] bg-warning/35 px-0.5 text-foreground">
             {part}
           </mark>
         ) : (
@@ -162,6 +162,32 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
         ),
       )}
     </p>
+  );
+}
+
+/** Ikonové tlačítko lišty akcí (44 px cíl, odezva při stisku). */
+function ToolbarButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="press grid size-11 place-items-center rounded-full text-primary hover:bg-fill disabled:pointer-events-none disabled:opacity-30"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -195,262 +221,395 @@ export const RecordingDetail = memo(function RecordingDetail({
     setEditing(false);
   };
 
+  const tone =
+    status.tone === "destructive"
+      ? "bg-destructive/12 text-destructive"
+      : busy
+        ? "bg-primary/12 text-primary"
+        : "bg-success/15 text-success";
+
   return (
-    <article className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-      <header className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-border p-4 sm:p-6">
-        <div className="min-w-0">
-          <Button variant="ghost" className="mb-3 -ml-3 min-h-11 lg:hidden" onClick={onClose}>
-            <ArrowLeft aria-hidden="true" /> Zpět do knihovny
-          </Button>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant={status.tone} className="gap-1.5">
-              {busy ? (
-                <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-              ) : null}
-              {status.label}
-            </Badge>
-            {recording.group ? <Badge variant="secondary">{recording.group}</Badge> : null}
-          </div>
-          <h2 className="truncate font-display text-xl font-semibold text-foreground sm:text-2xl">
-            {recording.title || new Date(recording.createdAt).toLocaleString("cs-CZ")}
+    <article className="min-w-0 animate-sheet-in">
+      {/* Zpět jako v iOS (jen na mobilu, na počítači je seznam vedle) */}
+      <button
+        type="button"
+        onClick={onClose}
+        className="press -ml-2 mb-1 inline-flex h-11 items-center gap-0.5 rounded-full pl-1 pr-3 text-[1.0625rem] text-primary lg:hidden"
+      >
+        <ChevronLeft className="size-6" aria-hidden="true" /> Knihovna
+      </button>
+
+      <header className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="font-display text-[1.75rem] font-bold leading-tight tracking-[-0.02em] text-foreground">
+            {recording.title ||
+              new Date(recording.createdAt).toLocaleString("cs-CZ", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}
           </h2>
-          <p className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5"><CalendarDays className="size-4" aria-hidden="true" />{new Date(recording.createdAt).toLocaleString("cs-CZ")}</span>
-            <span className="inline-flex items-center gap-1.5"><Clock3 className="size-4" aria-hidden="true" />{formatDuration(recording.duration)}</span>
+          <p className="footnote mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span>{new Date(recording.createdAt).toLocaleString("cs-CZ", { dateStyle: "medium", timeStyle: "short" })}</span>
+            <span aria-hidden="true">·</span>
+            <span className="tabular-nums">{formatDuration(recording.duration)}</span>
+            {recording.group ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{recording.group}</span>
+              </>
+            ) : null}
+          </p>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[0.8125rem] font-semibold ${tone}`}>
+              {busy ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : null}
+              {status.label}
+            </span>
             {gapCount > 0 ? (
               <span
-                className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-300"
+                className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2.5 py-0.5 text-[0.8125rem] font-semibold text-warning"
                 title={recording.gaps?.map((gap) => `v ${formatDuration(gap.at)}: ${gap.seconds} s`).join(", ")}
               >
-                <PauseCircle className="size-4" aria-hidden="true" />
+                <PauseCircle className="size-3.5" aria-hidden="true" />
                 Přerušeno {gapCount === 1 ? "1×" : `${gapCount}×`}, celkem {formatDuration(gapSeconds)}
               </span>
             ) : null}
-          </p>
+          </div>
         </div>
-        <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Zavřít detail" onClick={onClose}>
-          <X aria-hidden="true" />
-        </Button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Zavřít detail"
+          className="press hidden size-8 shrink-0 place-items-center rounded-full bg-fill text-muted-foreground lg:grid"
+        >
+          <X className="size-4" aria-hidden="true" />
+        </button>
       </header>
 
       {busy ? (
-        <div className="border-b border-border bg-muted/30 px-4 py-3 sm:px-6" aria-live="polite">
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="flex items-center gap-2 text-foreground">
-              <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />
-              {STAGE_LABELS[recording.stage ?? ""] ?? "Zpracovávám"}
-              {recording.stageDetail ? <span className="text-muted-foreground">· část {recording.stageDetail}</span> : null}
+        <div className="grouped mt-4 px-4 py-3" aria-live="polite">
+          <div className="flex items-center justify-between gap-3 text-[0.9375rem]">
+            <span className="flex min-w-0 items-center gap-2 text-foreground">
+              <Loader2 className="size-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
+              <span className="truncate">
+                {STAGE_LABELS[recording.stage ?? ""] ?? "Zpracovávám"}
+                {recording.stageDetail ? <span className="text-muted-foreground"> · část {recording.stageDetail}</span> : null}
+              </span>
             </span>
-            <span className="tabular-nums text-muted-foreground">{recording.progress ?? 0} %</span>
+            <span className="footnote tabular-nums">{recording.progress ?? 0} %</span>
           </div>
-          <Progress value={recording.progress ?? 0} className="mt-2 h-1.5" aria-label="Průběh zpracování" />
+          <Progress value={recording.progress ?? 0} className="mt-2 h-1" aria-label="Průběh zpracování" />
         </div>
       ) : null}
 
       {recording.uploadStatus === "running" ? (
-        <div className="border-b border-border bg-muted/30 px-4 py-3 sm:px-6" aria-live="polite">
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="text-foreground">Ukládám zvuk po částech do cloudu</span>
-            <span className="tabular-nums text-muted-foreground">{recording.uploadProgress ?? 0} %</span>
+        <div className="grouped mt-4 px-4 py-3" aria-live="polite">
+          <div className="flex items-center justify-between gap-3 text-[0.9375rem]">
+            <span className="text-foreground">Ukládám zvuk do cloudu</span>
+            <span className="footnote tabular-nums">{recording.uploadProgress ?? 0} %</span>
           </div>
-          <Progress value={recording.uploadProgress ?? 0} className="mt-2 h-1.5" aria-label="Průběh ukládání zvuku" />
+          <Progress value={recording.uploadProgress ?? 0} className="mt-2 h-1" aria-label="Průběh ukládání zvuku" />
         </div>
       ) : recording.uploadStatus === "error" ? (
-        <p className="border-b border-border bg-destructive/5 px-4 py-3 text-sm text-destructive sm:px-6" role="alert">
+        <p className="footnote mt-3 px-1" role="alert">
           Zvuk je uložený v tomto zařízení, cloudové uložení se ale nedokončilo.
         </p>
       ) : null}
 
       {!busy && recording.failedChunks ? (
-        <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 p-4 sm:m-6" role="alert">
-          <p className="font-medium text-destructive">Některé části se nepodařilo přepsat</p>
-          <p className="mt-1 text-sm text-foreground">
+        <div className="grouped mt-4 p-4" role="alert">
+          <p className="headline text-destructive">Některé části se nepodařilo přepsat</p>
+          <p className="mt-1 text-[0.9375rem] text-foreground">
             Chybí {recording.failedChunks} z {recording.chunkCount ?? "?"} částí. Zbytek přepisu je zachovaný ve správném pořadí.
           </p>
-          <Button variant="outline" className="mt-3 min-h-11" onClick={onRetry}>
-            <RotateCcw aria-hidden="true" /> Zpracovat znovu
-          </Button>
+          <button type="button" className="press mt-3 inline-flex h-11 items-center gap-2 rounded-full bg-fill px-4 font-semibold text-primary" onClick={onRetry}>
+            <RotateCcw className="size-4" aria-hidden="true" /> Zpracovat znovu
+          </button>
         </div>
       ) : null}
 
       {recording.status === "error" ? (
-        <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 p-4 sm:m-6" role="alert">
-          <p className="font-medium text-destructive">Přepis se nepodařilo dokončit</p>
-          <p className="mt-1 text-sm text-foreground">{recording.error || "Zkuste nahrávku nahrát znovu."}</p>
+        <div className="grouped mt-4 p-4" role="alert">
+          <p className="headline text-destructive">Přepis se nepodařilo dokončit</p>
+          <p className="mt-1 text-[0.9375rem] text-foreground">{recording.error || "Zkuste nahrávku nahrát znovu."}</p>
           {recording.hasAudio ? (
-            <Button variant="outline" className="mt-3 min-h-11" disabled={busy} onClick={onRetry}>
-              <RotateCcw aria-hidden="true" /> Zkusit přepis znovu
-            </Button>
+            <button
+              type="button"
+              className="press mt-3 inline-flex h-11 items-center gap-2 rounded-full bg-primary px-5 font-semibold text-primary-foreground disabled:opacity-40"
+              disabled={busy}
+              onClick={onRetry}
+            >
+              <RotateCcw className="size-4" aria-hidden="true" /> Zkusit přepis znovu
+            </button>
           ) : null}
         </div>
       ) : (
-        <Tabs defaultValue="summary" className="p-4 sm:p-6">
-          <TabsList className="grid h-11 w-full grid-cols-3 sm:w-auto">
-            <TabsTrigger value="summary" className="h-9 gap-2">
-              <Sparkles aria-hidden="true" /> AI shrnutí
+        <Tabs defaultValue="summary" className="mt-5 gap-0">
+          <TabsList className="segmented grid h-auto w-full grid-flow-col auto-cols-fr bg-[var(--fill)] p-[2px]">
+            <TabsTrigger value="summary" className="gap-1.5 border-0 text-foreground data-[state=active]:bg-card dark:data-[state=active]:bg-[#636366]">
+              <Sparkles className="size-3.5" aria-hidden="true" /> Shrnutí
             </TabsTrigger>
-            <TabsTrigger value="transcript" className="h-9 gap-2">
-              <FileText aria-hidden="true" /> Celý přepis
+            <TabsTrigger value="transcript" className="gap-1.5 border-0 text-foreground data-[state=active]:bg-card dark:data-[state=active]:bg-[#636366]">
+              <FileText className="size-3.5" aria-hidden="true" /> Přepis
             </TabsTrigger>
-            <TabsTrigger value="translation" className="h-9 gap-2">
-              <Languages aria-hidden="true" /> Překlad
+            <TabsTrigger value="translation" className="gap-1.5 border-0 text-foreground data-[state=active]:bg-card dark:data-[state=active]:bg-[#636366]">
+              <Languages className="size-3.5" aria-hidden="true" /> Překlad
             </TabsTrigger>
           </TabsList>
 
-
-          <TabsContent value="summary" className="mt-5">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium text-foreground">Nejdůležitější body rozhovoru</p>
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Kopírovat AI shrnutí" disabled={!recording.summary} onClick={() => onCopy(recording.summary ?? "")}>
-                  <Copy aria-hidden="true" />
-                </Button>
-                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Vytvořit AI shrnutí znovu" disabled={recording.status !== "done" || recording.summaryStatus === "running"} onClick={onRefreshSummary}>
-                  <RefreshCw aria-hidden="true" />
-                </Button>
-                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Exportovat AI shrnutí" disabled={recording.summaryStatus !== "done"} onClick={onExportSummary}>
-                  <Download aria-hidden="true" />
-                </Button>
-              </div>
-            </div>
-            {recording.summaryStatus === "error" ? (
-              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">{recording.summaryError}</p>
-            ) : recording.summary ? (
-              <p className="whitespace-pre-wrap rounded-md bg-muted/60 p-4 text-[0.9375rem] leading-7 text-foreground sm:p-5">{recording.summary}</p>
-            ) : (
-              <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border p-6 text-center" aria-live="polite">
-                <Loader2 className="size-5 animate-spin text-primary" aria-hidden="true" />
-                <div>
-                  <p className="font-medium text-foreground">AI připravuje shrnutí</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Můžete mezitím pokračovat v aplikaci.</p>
+          <TabsContent value="summary" className="mt-4 animate-fade-in">
+            <div className="grouped">
+              <div className="flex items-center justify-between gap-2 py-1 pl-4 pr-1">
+                <span className="section-label px-0">Hlavní body</span>
+                <div className="flex items-center">
+                  <ToolbarButton label="Kopírovat shrnutí" disabled={!recording.summary} onClick={() => onCopy(recording.summary ?? "")}>
+                    <Copy className="size-[1.125rem]" aria-hidden="true" />
+                  </ToolbarButton>
+                  <ToolbarButton
+                    label="Vytvořit shrnutí znovu"
+                    disabled={recording.status !== "done" || recording.summaryStatus === "running"}
+                    onClick={onRefreshSummary}
+                  >
+                    <RefreshCw className="size-[1.125rem]" aria-hidden="true" />
+                  </ToolbarButton>
+                  <ToolbarButton label="Exportovat shrnutí" disabled={recording.summaryStatus !== "done"} onClick={onExportSummary}>
+                    <Download className="size-[1.125rem]" aria-hidden="true" />
+                  </ToolbarButton>
                 </div>
               </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="transcript" className="mt-5">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <label className="relative block min-w-0">
-                <Search className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" aria-hidden="true" />
-                <Input className="h-11 pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Hledat v přepisu…" aria-label="Hledat v přepisu" />
-              </label>
-              <div className="flex items-center gap-1">
-                {editing ? (
-                  <Button className="min-h-11" onClick={saveEdit}><Check aria-hidden="true" /> Uložit změny</Button>
+              <div className="border-t border-separator px-4 py-4">
+                {recording.summaryStatus === "error" ? (
+                  <p className="text-[0.9375rem] text-destructive" role="alert">{recording.summaryError}</p>
+                ) : recording.summary ? (
+                  <p className="whitespace-pre-wrap text-[1.0625rem] leading-[1.6] text-foreground">{recording.summary}</p>
                 ) : (
-                  <Button variant="outline" className="min-h-11" disabled={recording.status !== "done"} onClick={() => { setDraft(recording.transcript); setEditing(true); }}><Pencil aria-hidden="true" /> Upravit</Button>
+                  <div className="flex min-h-36 flex-col items-center justify-center gap-2 text-center" aria-live="polite">
+                    <Loader2 className="size-5 animate-spin text-primary" aria-hidden="true" />
+                    <p className="headline text-foreground">Připravuji shrnutí</p>
+                    <p className="footnote">Mezitím můžete aplikaci dál používat.</p>
+                  </div>
                 )}
-                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Kopírovat celý přepis" disabled={!recording.transcript} onClick={() => onCopy(recording.transcript)}><Copy aria-hidden="true" /></Button>
-                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Exportovat celý přepis" disabled={recording.status !== "done"} onClick={onExportTranscript}><Download aria-hidden="true" /></Button>
               </div>
             </div>
+          </TabsContent>
 
-            {recording.refineStatus === "running" ? (
-              <p className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite"><WandSparkles className="size-4" aria-hidden="true" /> Dolaďuji češtinu, jména a čísla…</p>
-            ) : null}
-            <div className="mt-4 max-h-[34rem] overflow-y-auto rounded-md border border-border bg-background p-4 sm:p-5">
+          <TabsContent value="transcript" className="mt-4 animate-fade-in">
+            <div className="flex items-center gap-2">
+              <label className="search-field relative flex h-10 min-w-0 flex-1 items-center">
+                <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
+                <input
+                  className="h-full w-full bg-transparent pl-8 pr-3 text-[1.0625rem] text-foreground outline-none placeholder:text-muted-foreground"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Hledat v přepisu"
+                  aria-label="Hledat v přepisu"
+                  type="search"
+                />
+              </label>
               {editing ? (
-                <Textarea className="min-h-80 resize-y border-0 p-0 leading-7 shadow-none focus-visible:ring-0" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="Upravit celý přepis" />
-              ) : recording.transcript ? (
-                <HighlightedText text={recording.transcript} query={query} />
+                <button
+                  type="button"
+                  className="press h-10 rounded-full bg-primary px-4 text-[0.9375rem] font-semibold text-primary-foreground"
+                  onClick={saveEdit}
+                >
+                  Hotovo
+                </button>
               ) : (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" aria-hidden="true" /> Přepisuji první slova…</p>
+                <button
+                  type="button"
+                  className="press h-10 rounded-full px-3 text-[1.0625rem] text-primary hover:bg-fill disabled:opacity-30"
+                  disabled={recording.status !== "done"}
+                  onClick={() => {
+                    setDraft(recording.transcript);
+                    setEditing(true);
+                  }}
+                >
+                  Upravit
+                </button>
               )}
+            </div>
+
+            <div className="grouped mt-3">
+              <div className="flex items-center justify-between gap-2 py-1 pl-4 pr-1">
+                <span className="section-label px-0">Celý přepis</span>
+                <div className="flex items-center">
+                  <ToolbarButton label="Kopírovat přepis" disabled={!recording.transcript} onClick={() => onCopy(recording.transcript)}>
+                    <Copy className="size-[1.125rem]" aria-hidden="true" />
+                  </ToolbarButton>
+                  <ToolbarButton label="Exportovat přepis" disabled={recording.status !== "done"} onClick={onExportTranscript}>
+                    <Download className="size-[1.125rem]" aria-hidden="true" />
+                  </ToolbarButton>
+                </div>
+              </div>
+              {recording.refineStatus === "running" ? (
+                <p className="footnote flex items-center gap-2 border-t border-separator px-4 py-2" aria-live="polite">
+                  <WandSparkles className="size-4" aria-hidden="true" /> Dolaďuji češtinu, jména a čísla…
+                </p>
+              ) : null}
+              <div className="max-h-[60vh] overflow-y-auto overscroll-contain border-t border-separator px-4 py-4 lg:max-h-[34rem]">
+                {editing ? (
+                  <Textarea
+                    className="min-h-80 resize-y border-0 bg-transparent p-0 text-[1.0625rem] leading-[1.6] shadow-none focus-visible:ring-0"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    aria-label="Upravit celý přepis"
+                  />
+                ) : recording.transcript ? (
+                  <HighlightedText text={recording.transcript} query={query} />
+                ) : (
+                  <p className="footnote flex items-center gap-2">
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Přepisuji první slova…
+                  </p>
+                )}
+              </div>
             </div>
           </TabsContent>
 
-          <TabsContent value="translation" className="mt-5">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,14rem)_auto_auto_auto]">
-              <Select value={target} onValueChange={setTarget} disabled={busy}>
-                <SelectTrigger className="h-11" aria-label="Jazyk překladu"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {TRANSLATION_LANGS.map((lang) => (
-                    <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button className="min-h-11" disabled={busy || !recording.transcript} onClick={() => onTranslate(target)}>
-                <Languages aria-hidden="true" /> {recording.translation ? "Přeložit znovu" : "Přeložit"}
-              </Button>
-              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Kopírovat překlad" disabled={!recording.translation} onClick={() => onCopy(recording.translation ?? "")}>
-                <Copy aria-hidden="true" />
-              </Button>
-              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Exportovat překlad" disabled={!recording.translation} onClick={onExportTranslation}>
-                <Download aria-hidden="true" />
-              </Button>
+          <TabsContent value="translation" className="mt-4 animate-fade-in">
+            <div className="grouped">
+              <label className="flex min-h-11 items-center gap-3 pl-4 pr-1">
+                <span className="flex-1 text-[1.0625rem] text-foreground">Přeložit do</span>
+                <Select value={target} onValueChange={setTarget} disabled={busy}>
+                  <SelectTrigger
+                    className="h-11 w-auto gap-1 border-0 bg-transparent pr-3 text-[1.0625rem] text-muted-foreground shadow-none focus-visible:ring-0"
+                    aria-label="Jazyk překladu"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TRANSLATION_LANGS.map((lang) => (
+                      <SelectItem key={lang.value} value={lang.value}>
+                        {lang.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
             </div>
-            <p className="mt-3 text-xs leading-5 text-muted-foreground">
-              Dlouhé přepisy se překládají po částech a spojí se do jednoho souvislého textu ve stejném pořadí.
-            </p>
+            <button
+              type="button"
+              className="press mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-[0.875rem] bg-primary text-[1.0625rem] font-semibold text-primary-foreground disabled:opacity-40"
+              disabled={busy || !recording.transcript}
+              onClick={() => onTranslate(target)}
+            >
+              <Languages className="size-5" aria-hidden="true" /> {recording.translation ? "Přeložit znovu" : "Přeložit"}
+            </button>
+            <p className="footnote mt-2 px-4">Dlouhé přepisy se překládají po částech a spojí se ve stejném pořadí.</p>
+
             {recording.translationStatus === "running" ? (
-              <div className="mt-3">
-                <p className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <span>
-                    {recording.stageDetail
-                      ? `Překládám – ${recording.stageDetail}`
-                      : "Připravuji překlad…"}
-                  </span>
+              <div className="mt-3 px-1">
+                <p className="footnote flex items-center justify-between gap-3">
+                  <span>{recording.stageDetail ? `Překládám – ${recording.stageDetail}` : "Připravuji překlad…"}</span>
                   <span className="tabular-nums">{recording.progress ?? 0} %</span>
                 </p>
-                <Progress value={recording.progress ?? 0} className="mt-2 h-1.5" aria-label="Průběh překladu" />
+                <Progress value={recording.progress ?? 0} className="mt-1.5 h-1" aria-label="Průběh překladu" />
               </div>
             ) : null}
+
             {recording.translationError ? (
-              <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-4" role="alert">
-                <p className="text-sm text-destructive">{recording.translationError}</p>
+              <div className="grouped mt-3 p-4" role="alert">
+                <p className="text-[0.9375rem] text-destructive">{recording.translationError}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(recording.translationParts ?? []).some((part) => part.trim()) ? (
-                    <Button variant="outline" className="min-h-11" disabled={busy} onClick={() => onTranslate(target, { resume: true })}>
-                      <Languages aria-hidden="true" /> Dokončit chybějící části
-                    </Button>
+                    <button
+                      type="button"
+                      className="press h-11 rounded-full bg-fill px-4 font-semibold text-primary disabled:opacity-40"
+                      disabled={busy}
+                      onClick={() => onTranslate(target, { resume: true })}
+                    >
+                      Dokončit chybějící části
+                    </button>
                   ) : null}
-                  <Button variant="outline" className="min-h-11" disabled={busy} onClick={() => onTranslate(target)}>
-                    <Languages aria-hidden="true" /> Zkusit znovu od začátku
-                  </Button>
+                  <button
+                    type="button"
+                    className="press h-11 rounded-full bg-fill px-4 font-semibold text-primary disabled:opacity-40"
+                    disabled={busy}
+                    onClick={() => onTranslate(target)}
+                  >
+                    Zkusit znovu od začátku
+                  </button>
                 </div>
               </div>
             ) : null}
-            <div className="mt-4 max-h-[34rem] overflow-y-auto rounded-md border border-border bg-background p-4 sm:p-5">
-              {recording.translation ? (
-                <p className="whitespace-pre-wrap text-[0.9375rem] leading-7 text-foreground">{recording.translation}</p>
-              ) : recording.translationStatus === "running" ? (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" aria-hidden="true" /> Překládám…</p>
-              ) : (
-                <p className="text-sm text-muted-foreground">Vyberte jazyk a spusťte překlad celého přepisu.</p>
-              )}
-            </div>
+
+            {recording.translation || recording.translationStatus === "running" ? (
+              <div className="grouped mt-4">
+                <div className="flex items-center justify-between gap-2 py-1 pl-4 pr-1">
+                  <span className="section-label px-0">Překlad</span>
+                  <div className="flex items-center">
+                    <ToolbarButton label="Kopírovat překlad" disabled={!recording.translation} onClick={() => onCopy(recording.translation ?? "")}>
+                      <Copy className="size-[1.125rem]" aria-hidden="true" />
+                    </ToolbarButton>
+                    <ToolbarButton label="Exportovat překlad" disabled={!recording.translation} onClick={onExportTranslation}>
+                      <Download className="size-[1.125rem]" aria-hidden="true" />
+                    </ToolbarButton>
+                  </div>
+                </div>
+                <div className="max-h-[60vh] overflow-y-auto overscroll-contain border-t border-separator px-4 py-4 lg:max-h-[34rem]">
+                  {recording.translation ? (
+                    <p className="whitespace-pre-wrap text-[1.0625rem] leading-[1.6] text-foreground">{recording.translation}</p>
+                  ) : (
+                    <p className="footnote flex items-center gap-2">
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Překládám…
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </TabsContent>
         </Tabs>
       )}
 
-      <footer className="flex flex-wrap items-center gap-2 border-t border-border bg-muted/30 p-4 sm:px-6">
+      {/* Zvuk a mazání jako seskupený seznam; mazání je oddělené a červené. */}
+      <div className="mt-6 space-y-6">
         {recording.hasAudio ? (
-          <>
-            <Button variant="outline" className="min-h-11" onClick={onTogglePlayer}>
-              {audioUrl ? <X aria-hidden="true" /> : <Play aria-hidden="true" />}
-              {audioUrl ? "Zavřít přehrávač" : "Přehrát záznam"}
-            </Button>
-            <Button variant="ghost" className="min-h-11" onClick={onExportAudio}><Music aria-hidden="true" /> Export zvuku</Button>
-          </>
+          <div>
+            <h3 className="section-label mb-1.5">Zvuk</h3>
+            <div className="grouped">
+              <button type="button" className="grouped-row tap-row flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left" onClick={onTogglePlayer}>
+                {audioUrl ? <X className="size-5 text-primary" aria-hidden="true" /> : <Play className="size-5 text-primary" aria-hidden="true" />}
+                <span className="text-[1.0625rem] text-primary">{audioUrl ? "Zavřít přehrávač" : "Přehrát nahrávku"}</span>
+              </button>
+              {audioUrl ? (
+                <div className="grouped-row px-4 py-3">
+                  <audio className="w-full" controls src={audioUrl}>
+                    Váš prohlížeč nepodporuje přehrávání zvuku.
+                  </audio>
+                </div>
+              ) : null}
+              <button type="button" className="grouped-row tap-row flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left" onClick={onExportAudio}>
+                <Music className="size-5 text-primary" aria-hidden="true" />
+                <span className="text-[1.0625rem] text-primary">Exportovat zvuk</span>
+              </button>
+            </div>
+          </div>
         ) : null}
-        <span className="hidden flex-1 sm:block" />
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="ghost" className="min-h-11 text-destructive hover:bg-destructive/10 hover:text-destructive"><Trash2 aria-hidden="true" /> Smazat nahrávku</Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Smazat tuto nahrávku?</AlertDialogTitle>
-              <AlertDialogDescription>Zvuk, přepis, shrnutí i překlad budou trvale odstraněny. Tuto akci nelze vrátit.</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Zrušit</AlertDialogCancel>
-              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={onDelete}>Smazat nahrávku</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-        {audioUrl ? <audio className="w-full" controls src={audioUrl}>Váš prohlížeč nepodporuje přehrávání zvuku.</audio> : null}
-      </footer>
+
+        <div className="grouped">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button type="button" className="tap-row flex min-h-11 w-full items-center justify-center gap-2 px-4 py-2.5 text-[1.0625rem] text-destructive">
+                <Trash2 className="size-5" aria-hidden="true" /> Smazat nahrávku
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent className="max-w-[20rem] gap-0 rounded-[0.875rem] p-0 text-center">
+              <AlertDialogHeader className="px-5 pb-4 pt-5 text-center sm:text-center">
+                <AlertDialogTitle className="headline text-[1.0625rem]">Smazat nahrávku?</AlertDialogTitle>
+                <AlertDialogDescription className="text-[0.8125rem] leading-5 text-foreground/80">
+                  Zvuk, přepis, shrnutí i překlad budou trvale odstraněny. Tuto akci nelze vrátit.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="grid grid-cols-2 gap-0 sm:grid sm:space-x-0">
+                <AlertDialogCancel className="m-0 h-11 rounded-none border-0 border-r border-t border-separator bg-transparent text-[1.0625rem] text-primary shadow-none hover:bg-fill">
+                  Zrušit
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  className="m-0 h-11 rounded-none border-0 border-t border-separator bg-transparent text-[1.0625rem] font-semibold text-destructive shadow-none hover:bg-fill"
+                  onClick={onDelete}
+                >
+                  Smazat
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
     </article>
   );
 });

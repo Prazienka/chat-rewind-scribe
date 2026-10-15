@@ -10,8 +10,8 @@
  * The @theme inline block maps CSS custom properties to Tailwind utility
  * classes (e.g. --color-primary -> bg-primary, text-primary).
  *
- * The :root and .dark blocks define the actual color values using oklch.
- * All colors MUST use oklch format.
+ * The :root and .dark blocks define the actual color values. The palette
+ * follows Apple's system colors (iOS/macOS) so light and dark mode feel native.
  *
  * To add a new semantic color:
  * 1. Add the variable to :root (light value) and .dark (dark value)
@@ -59,86 +59,117 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-record: var(--record);
+  --color-separator: var(--separator);
+  --color-fill: var(--fill);
+  --color-grouped: var(--grouped);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
 }
 
 @theme inline {
-  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  /* Systémové písmo: na Apple zařízeních SF Pro s optickými velikostmi. */
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  /* Křivka iOS listů (rychlý start, měkké dosednutí bez překmitu). */
+  --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-sheet-in: sheet-in 420ms var(--ease-ios) both;
+  --animate-fade-in: fade-in 240ms var(--ease-ios) both;
+}
+
+@keyframes sheet-in {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 :root {
-  --radius: 0.75rem;
-  --shadow-record: 0 18px 40px -12px color-mix(in oklab, var(--primary) 45%, transparent);
-  --background: oklch(0.975 0.004 225);
-  --foreground: oklch(0.215 0.025 252);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.24 0.02 250);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.24 0.02 250);
-  --primary: oklch(0.49 0.13 194);
-  --primary-foreground: oklch(0.99 0.005 85);
-  --secondary: oklch(0.94 0.018 196);
-  --secondary-foreground: oklch(0.3 0.03 240);
-  --muted: oklch(0.95 0.008 225);
-  --muted-foreground: oklch(0.52 0.02 250);
-  --accent: oklch(0.83 0.11 62);
-  --accent-foreground: oklch(0.26 0.04 60);
-  --destructive: oklch(0.56 0.19 24);
-  --destructive-foreground: oklch(0.99 0.005 85);
-  --border: oklch(0.885 0.012 220);
-  --input: oklch(0.86 0.014 210);
-  --ring: oklch(0.5 0.12 200);
-  --chart-1: oklch(0.52 0.11 205);
-  --chart-2: oklch(0.83 0.11 62);
-  --chart-3: oklch(0.6 0.09 160);
-  --chart-4: oklch(0.7 0.12 300);
-  --chart-5: oklch(0.56 0.19 24);
-  --sidebar: oklch(0.98 0.008 85);
-  --sidebar-foreground: oklch(0.24 0.02 250);
-  --sidebar-primary: oklch(0.52 0.11 205);
-  --sidebar-primary-foreground: oklch(0.99 0.005 85);
-  --sidebar-accent: oklch(0.95 0.015 90);
-  --sidebar-accent-foreground: oklch(0.3 0.03 240);
-  --sidebar-border: oklch(0.9 0.012 90);
-  --sidebar-ring: oklch(0.52 0.11 205);
+  --radius: 0.875rem;
+  --shadow-record: 0 0 0 0 transparent;
+  /* Pozadí seskupených seznamů (systemGroupedBackground) */
+  --background: #f2f2f7;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --popover: #ffffff;
+  --popover-foreground: #000000;
+  --primary: #007aff;
+  --primary-foreground: #ffffff;
+  --secondary: #e9e9eb;
+  --secondary-foreground: #000000;
+  --muted: #f2f2f7;
+  --muted-foreground: #6c6c70;
+  --accent: #fff3b0;
+  --accent-foreground: #000000;
+  --destructive: #ff3b30;
+  --destructive-foreground: #ffffff;
+  --border: #d1d1d6;
+  --separator: rgb(60 60 67 / 0.29);
+  --input: #e3e3e8;
+  --ring: #007aff;
+  --record: #ff3b30;
+  --fill: rgb(120 120 128 / 0.12);
+  --grouped: #ffffff;
+  --success: #34c759;
+  --warning: #ff9500;
+  --chart-1: #007aff;
+  --chart-2: #34c759;
+  --chart-3: #ff9500;
+  --chart-4: #af52de;
+  --chart-5: #ff3b30;
+  --sidebar: #f2f2f7;
+  --sidebar-foreground: #000000;
+  --sidebar-primary: #007aff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e9e9eb;
+  --sidebar-accent-foreground: #000000;
+  --sidebar-border: #d1d1d6;
+  --sidebar-ring: #007aff;
 }
-
 
 .dark {
   color-scheme: dark;
-  --shadow-record: 0 18px 44px -14px color-mix(in oklab, var(--primary) 55%, transparent);
-  --background: oklch(0.17 0.012 235);
-  --foreground: oklch(0.95 0.006 220);
-  --card: oklch(0.21 0.014 235);
-  --card-foreground: oklch(0.95 0.006 220);
-  --popover: oklch(0.23 0.015 235);
-  --popover-foreground: oklch(0.95 0.006 220);
-  --primary: oklch(0.72 0.12 190);
-  --primary-foreground: oklch(0.18 0.03 220);
-  --secondary: oklch(0.29 0.03 200);
-  --secondary-foreground: oklch(0.93 0.01 200);
-  --muted: oklch(0.26 0.014 235);
-  --muted-foreground: oklch(0.72 0.018 230);
-  --accent: oklch(0.78 0.12 65);
-  --accent-foreground: oklch(0.22 0.04 60);
-  --destructive: oklch(0.66 0.19 24);
-  --destructive-foreground: oklch(0.99 0.005 85);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.72 0.12 190);
-  --chart-1: oklch(0.72 0.12 190);
-  --chart-2: oklch(0.78 0.12 65);
-  --chart-3: oklch(0.7 0.11 160);
-  --chart-4: oklch(0.72 0.13 300);
-  --chart-5: oklch(0.66 0.19 24);
-  --sidebar: oklch(0.21 0.014 235);
-  --sidebar-foreground: oklch(0.95 0.006 220);
-  --sidebar-primary: oklch(0.72 0.12 190);
-  --sidebar-primary-foreground: oklch(0.18 0.03 220);
-  --sidebar-accent: oklch(0.29 0.03 200);
-  --sidebar-accent-foreground: oklch(0.93 0.01 200);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.72 0.12 190);
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #1c1c1e;
+  --card-foreground: #ffffff;
+  --popover: #2c2c2e;
+  --popover-foreground: #ffffff;
+  --primary: #0a84ff;
+  --primary-foreground: #ffffff;
+  --secondary: #2c2c2e;
+  --secondary-foreground: #ffffff;
+  --muted: #1c1c1e;
+  --muted-foreground: #98989f;
+  --accent: #5c4b00;
+  --accent-foreground: #ffffff;
+  --destructive: #ff453a;
+  --destructive-foreground: #ffffff;
+  --border: #38383a;
+  --separator: rgb(84 84 88 / 0.65);
+  --input: #3a3a3c;
+  --ring: #0a84ff;
+  --record: #ff453a;
+  --fill: rgb(118 118 128 / 0.24);
+  --grouped: #1c1c1e;
+  --success: #30d158;
+  --warning: #ff9f0a;
+  --chart-1: #0a84ff;
+  --chart-2: #30d158;
+  --chart-3: #ff9f0a;
+  --chart-4: #bf5af2;
+  --chart-5: #ff453a;
+  --sidebar: #1c1c1e;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #0a84ff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2c2c2e;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #38383a;
+  --sidebar-ring: #0a84ff;
 }
 
 @layer base {
@@ -146,23 +177,40 @@
     border-color: var(--color-border);
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
-    letter-spacing: 0;
+    font-size: 1.0625rem; /* 17 px – velikost těla textu v iOS */
+    line-height: 1.47;
+    letter-spacing: -0.01em;
+    font-optical-sizing: auto;
     text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
     min-width: 320px;
+    /* Plynulý přechod světlo ↔ tma místo skoku jasu */
+    transition: background-color 300ms ease, color 300ms ease;
   }
 
   h1,
   h2,
+  h3,
   .font-display {
     font-family: var(--font-display);
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--primary) 22%, transparent);
+    background: color-mix(in oklab, var(--primary) 28%, transparent);
+  }
+
+  :focus-visible {
+    outline: 3px solid color-mix(in oklab, var(--ring) 55%, transparent);
+    outline-offset: 2px;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -175,5 +223,145 @@
       transition-duration: 0.01ms !important;
     }
   }
+}
 
+@layer components {
+  /* Velký nadpis obrazovky: těsné proklady, záporný tracking jako v iOS. */
+  .large-title {
+    font-family: var(--font-display);
+    font-size: 2.125rem;
+    line-height: 1.12;
+    font-weight: 700;
+    letter-spacing: -0.022em;
+  }
+  .headline {
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  .footnote {
+    font-size: 0.8125rem;
+    line-height: 1.38;
+    letter-spacing: -0.005em;
+    color: var(--muted-foreground);
+  }
+  .section-label {
+    font-size: 0.8125rem;
+    line-height: 1.38;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--muted-foreground);
+    padding-inline: 1rem;
+  }
+
+  /* Průsvitný materiál pro lišty – obsah pod ním prosvítá. */
+  .material {
+    background: color-mix(in oklab, var(--background) 72%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+  }
+  .material-thick {
+    background: color-mix(in oklab, var(--card) 80%, transparent);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    backdrop-filter: blur(30px) saturate(180%);
+  }
+
+  /* Seskupený seznam (Inset Grouped) s odsazenými oddělovači. */
+  .grouped {
+    background: var(--grouped);
+    border-radius: 0.875rem;
+    overflow: hidden;
+  }
+  .grouped-row {
+    position: relative;
+  }
+  .grouped-row + .grouped-row::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: var(--row-inset, 1rem);
+    height: 0.5px;
+    background: var(--separator);
+  }
+
+  /* Odezva hned při stisku, ne až po puštění. */
+  .press {
+    transition:
+      transform 160ms var(--ease-ios),
+      background-color 160ms ease,
+      opacity 160ms ease;
+  }
+  .press:active {
+    transform: scale(0.97);
+  }
+  .tap-row {
+    transition: background-color 120ms ease;
+  }
+  .tap-row:active {
+    background-color: var(--fill);
+  }
+
+  /* Segmentový přepínač */
+  .segmented {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 0.5625rem;
+    background: var(--fill);
+  }
+  .segmented > * {
+    border-radius: 0.4375rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    min-height: 2rem;
+    transition:
+      background-color 200ms var(--ease-ios),
+      box-shadow 200ms var(--ease-ios),
+      color 200ms ease;
+  }
+  .segmented > [data-state="active"],
+  .segmented > [aria-pressed="true"] {
+    background: var(--card);
+    box-shadow:
+      0 3px 8px rgb(0 0 0 / 0.12),
+      0 1px 1px rgb(0 0 0 / 0.04);
+    font-weight: 600;
+  }
+  .dark .segmented > [data-state="active"],
+  .dark .segmented > [aria-pressed="true"] {
+    background: #636366;
+  }
+
+  /* Vyhledávací pole v iOS stylu */
+  .search-field {
+    background: var(--fill);
+    border-radius: 0.625rem;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .material,
+  .material-thick {
+    background: var(--background);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --separator: rgb(60 60 67 / 0.6);
+    --muted-foreground: #3a3a3c;
+  }
+  .dark {
+    --separator: rgb(235 235 245 / 0.5);
+    --muted-foreground: #c7c7cc;
+  }
+  .material,
+  .material-thick {
+    background: var(--background);
+    border-color: var(--foreground);
+  }
 }

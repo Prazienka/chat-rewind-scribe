@@ -147,24 +147,29 @@ const LANGS = [
   { value: "de", label: "Němčina" },
 ];
 
+/** Živá vlna jako v Diktafonu: nové hodnoty přibývají zprava, střed značí „teď“. */
 function Waveform({ level, active }: { level: number; active: boolean }) {
-  const [bars, setBars] = useState<number[]>(() => Array.from({ length: 40 }, () => 0));
+  const BARS = 56;
+  const [bars, setBars] = useState<number[]>(() => Array.from({ length: BARS }, () => 0));
   useEffect(() => {
     if (!active) {
       setBars((prev) => prev.map(() => 0));
       return;
     }
-    setBars((prev) => [...prev.slice(1), Math.min(1, level * 2.2)]);
+    setBars((prev) => [...prev.slice(1), Math.min(1, level * 2.4)]);
   }, [level, active]);
   return (
-    <div className="mt-6 flex h-12 w-full max-w-sm items-center justify-center gap-[3px]" aria-hidden="true">
-      {bars.map((value, i) => (
-        <span
-          key={i}
-          className={`w-1 rounded-full transition-[height] duration-100 motion-reduce:transition-none ${active ? "bg-destructive/80" : "bg-border"}`}
-          style={{ height: `${Math.max(4, value * 48)}px` }}
-        />
-      ))}
+    <div className="relative mt-5 h-16 w-full max-w-md sm:mt-8 sm:h-24" aria-hidden="true">
+      <div className="absolute inset-0 flex items-center justify-center gap-[3px]">
+        {bars.map((value, i) => (
+          <span
+            key={i}
+            className={`h-full w-[3px] origin-center rounded-full transition-transform duration-100 ease-out motion-reduce:transition-none ${active ? "bg-record" : "bg-separator"}`}
+            // Jen transform – kompozitor zvládne 60 fps bez přepočtu layoutu.
+            style={{ transform: `scaleY(${Math.max(0.04, value)})` }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -1572,448 +1577,649 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         ? "secondary"
         : "outline";
 
+  const statusSegments = [
+    { value: "all", label: "Vše" },
+    { value: "ready", label: "Hotové" },
+    { value: "processing", label: "Probíhá" },
+    { value: "error", label: "S chybou" },
+  ];
+
   return (
-    <div className="min-h-dvh bg-background pb-[calc(6rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:pb-12">
-      <header className="sticky top-0 z-30 border-b border-border bg-background/90 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
-        <div className="mx-auto grid min-h-[4.5rem] w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
-          <Link to="/" className="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground shadow-sm"><AudioLines className="size-5" aria-hidden="true" /></span>
-            <span className="min-w-0">
-              <span className="block truncate font-display text-base font-bold text-foreground">Chat Scribe</span>
-              <span className="hidden truncate text-xs text-muted-foreground sm:block">Nahrávky přehledně</span>
+    <div className="min-h-dvh bg-background pb-[calc(6rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:pb-16">
+      {/* Navigační lišta: průsvitný materiál, obsah pod ní prosvítá. */}
+      <header className="material sticky top-0 z-30 pt-[env(safe-area-inset-top)] shadow-[0_0.5px_0_var(--separator)]">
+        <div className="mx-auto flex h-13 w-full max-w-6xl items-center justify-between gap-3 px-4 sm:px-6 md:grid md:grid-cols-[1fr_auto_1fr]">
+          <Link to="/" className="press flex min-w-0 items-center gap-2 justify-self-start rounded-lg">
+            <span className="grid size-7 shrink-0 place-items-center rounded-[0.5rem] bg-record text-white">
+              <AudioLines className="size-4" aria-hidden="true" />
             </span>
+            <span className="headline truncate text-[0.9375rem] text-foreground">Chat Scribe</span>
           </Link>
-          <div className="flex shrink-0 items-center gap-1">
-            <nav className="hidden items-center gap-1 md:flex" aria-label="Hlavní navigace">
-              <Button variant={mode === "recorder" ? "secondary" : "ghost"} className="min-h-11" asChild><Link to="/"><Mic aria-hidden="true" /> Nahrávání</Link></Button>
-              <Button variant={mode === "library" ? "secondary" : "ghost"} className="min-h-11" asChild><Link to="/transcripts"><Library aria-hidden="true" /> Knihovna</Link></Button>
-            </nav>
+
+          <nav className="segmented hidden w-64 md:grid" aria-label="Hlavní navigace">
+            <Link to="/" aria-pressed={mode === "recorder"} className="press grid place-items-center text-foreground">
+              Nahrávání
+            </Link>
+            <Link to="/transcripts" aria-pressed={mode === "library"} className="press grid place-items-center text-foreground">
+              Knihovna{processingCount > 0 ? <span className="sr-only">, {processingCount} se zpracovává</span> : null}
+            </Link>
+          </nav>
+
+          <div className="flex items-center justify-self-end">
             {user ? (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <span className="hidden max-w-32 truncate lg:inline">{user.email}</span>
+              <div className="flex items-center gap-1">
+                <span className="footnote hidden max-w-40 truncate lg:inline">{user.email}</span>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="min-h-11 min-w-11"
+                  className="press min-h-11 min-w-11 rounded-full text-primary hover:bg-fill hover:text-primary"
                   aria-label="Odhlásit se"
-                  onClick={() =>
-                    void getSupabase().then((sb) => sb.auth.signOut())
-                  }
+                  onClick={() => void getSupabase().then((sb) => sb.auth.signOut())}
                 >
                   <LogOut aria-hidden="true" />
                 </Button>
               </div>
             ) : (
-              <Button variant="outline" className="min-h-11" asChild>
-                <Link to="/auth">
-                  <LogIn aria-hidden="true" /><span className="hidden sm:inline">Přihlásit se</span>
-                </Link>
-              </Button>
+              <Link
+                to="/auth"
+                className="press inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-[0.9375rem] font-medium text-primary hover:bg-fill"
+              >
+                <LogIn className="size-4" aria-hidden="true" />
+                <span className="hidden sm:inline">Přihlásit se</span>
+              </Link>
             )}
           </div>
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
-        {mode === "recorder" && showOnboarding ? (
-          <section className="mb-5 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5" aria-labelledby="onboarding-title">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <ListChecks className="size-5 shrink-0 text-primary" aria-hidden="true" />
-                  <h2 id="onboarding-title" className="font-display text-base font-semibold text-foreground">Začněte během chvilky</h2>
-                </div>
-                <ol className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-                  <li className="flex gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">1</span><span><strong className="block text-foreground">Spusťte nahrávání</strong><span className="text-muted-foreground">Velké tlačítko vždy ukazuje aktuální stav.</span></span></li>
-                  <li className="flex gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">2</span><span><strong className="block text-foreground">Sledujte stav</strong><span className="text-muted-foreground">Pozadí ani obnova neznamenají ukončení.</span></span></li>
-                  <li className="flex gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">3</span><span><strong className="block text-foreground">Otevřete Knihovnu</strong><span className="text-muted-foreground">Najdete tam přepis, shrnutí i exporty.</span></span></li>
-                </ol>
-                <Button variant="link" className="mt-2 h-11 px-0" onClick={dismissOnboarding}>Rozumím, skrýt průvodce</Button>
-              </div>
-              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Přeskočit průvodce a příště nezobrazovat" onClick={dismissOnboarding}><X aria-hidden="true" /></Button>
-            </div>
-          </section>
-        ) : null}
-
+      <main className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-6 sm:pt-8">
         {mode === "recorder" ? (
-          <section id="record" className="scroll-mt-24 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-            <div className="grid lg:grid-cols-[minmax(0,1.4fr)_minmax(19rem,0.6fr)]">
-              <div className="flex min-h-[31rem] flex-col items-center justify-center p-6 text-center sm:p-12">
-              <Badge variant={recorderStateTone} className="mb-4 gap-2" aria-live="polite"><Radio className={`size-3.5 ${isRecording ? "animate-pulse" : ""}`} aria-hidden="true" /> {recorderState}</Badge>
-              <h1 className="font-display text-3xl font-bold text-foreground sm:text-5xl">Nová nahrávka</h1>
-              <p className="mt-3 max-w-lg text-base leading-7 text-muted-foreground">Spusťte nahrávání rozhovoru. Přepis a stručné shrnutí připravíme automaticky.</p>
+          <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+            {/* Nahrávání ve stylu Diktafonu */}
+            <section id="record" className="scroll-mt-24 animate-fade-in">
+              <h1 className="large-title text-foreground">Nová nahrávka</h1>
+              <p className="footnote mt-1">Nahrajte rozhovor, přepis a shrnutí připravíme automaticky.</p>
 
-              <div className="relative mt-8 flex size-44 items-center justify-center sm:size-48">
-                {isRecording && (
+              <div className="grouped mt-5 flex flex-col items-center px-5 pb-6 pt-6 sm:px-8 sm:pb-10 sm:pt-7">
+                <span
+                  aria-live="polite"
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[0.8125rem] font-semibold ${
+                    recorderStateTone === "destructive"
+                      ? "bg-destructive/12 text-destructive"
+                      : isRecording
+                        ? "bg-record/12 text-record"
+                        : processingRecordings.length > 0
+                          ? "bg-primary/12 text-primary"
+                          : "bg-fill text-muted-foreground"
+                  }`}
+                >
                   <span
+                    className={`size-1.5 rounded-full ${isRecording ? "animate-pulse bg-record" : processingRecordings.length > 0 ? "bg-primary" : "bg-muted-foreground"}`}
                     aria-hidden="true"
-                    className="absolute inset-4 rounded-full bg-destructive/15 transition-transform duration-100 motion-reduce:transform-none"
-                    style={{ transform: `scale(${1 + Math.min(level, 0.5) * 0.6})` }}
                   />
-                )}
+                  {recorderState}
+                </span>
+
+                <p
+                  className="mt-4 font-display text-[4.25rem] font-light leading-none tracking-[-0.03em] text-foreground tabular-nums sm:text-[5rem]"
+                  aria-live="off"
+                >
+                  {formatDuration(elapsed)}
+                </p>
+                <p className="footnote mt-2 min-h-5 text-center" aria-live="polite">
+                  {isRecording
+                    ? segmentCount > 0
+                      ? `Bezpečně uloženo ${segmentCount} ${segmentCount === 1 ? "část" : segmentCount < 5 ? "části" : "částí"}`
+                      : "Nahrávka se průběžně ukládá"
+                    : "Připraveno k nahrávání"}
+                </p>
+
+                <Waveform level={level} active={isRecording} />
+
+                {/* Tlačítko jako v Diktafonu: kruh se plynule změní ve čtverec. */}
                 <button
                   type="button"
                   onClick={() => void (isRecording ? stop() : start())}
-                  className={`relative grid size-32 place-items-center rounded-full shadow-[var(--shadow-record)] transition-all duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-card active:scale-95 motion-reduce:transition-none sm:size-36 ${isRecording ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground hover:scale-105"}`}
+                  className="press group relative mt-6 grid size-[5.5rem] sm:mt-8 place-items-center rounded-full border-[3.5px] border-foreground/20 focus-visible:outline-offset-4 active:scale-95"
                   aria-label={isRecording ? "Zastavit nahrávání" : "Spustit nahrávání"}
                   aria-pressed={isRecording}
                 >
-                  {isRecording ? <Square className="size-10 fill-current" aria-hidden="true" /> : <Mic className="size-12" aria-hidden="true" />}
+                  {isRecording ? (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute -inset-2 rounded-full bg-record/15 transition-transform duration-150 ease-out motion-reduce:hidden"
+                      style={{ transform: `scale(${1 + Math.min(level, 0.5) * 0.35})` }}
+                    />
+                  ) : null}
+                  <span
+                    aria-hidden="true"
+                    className={`relative bg-record transition-all duration-300 ease-[var(--ease-ios)] group-hover:brightness-110 ${
+                      isRecording ? "size-8 rounded-[0.5rem]" : "size-[4.25rem] rounded-full"
+                    }`}
+                  />
                 </button>
-              </div>
-              <p className="mt-1 text-sm font-medium text-muted-foreground">{isRecording ? "Klepnutím ukončíte" : "Klepnutím spustíte"}</p>
-              <Waveform level={level} active={isRecording} />
-              <p className="mt-5 font-display text-4xl font-bold tabular-nums text-foreground" aria-live="off">
-                {formatDuration(elapsed)}
-              </p>
-              <div className="mt-2 flex items-center gap-2 text-sm" aria-live="polite">
-                <Circle className={`size-2.5 ${isRecording ? "fill-destructive text-destructive" : "fill-muted-foreground text-muted-foreground"}`} aria-hidden="true" />
-                <span className={isRecording ? "font-medium text-destructive" : "text-muted-foreground"}>
-                  {isRecording
-                    ? `${sessionLabel(sessionState)}${sessionState.phase === "recording" ? " — klepnutím zastavíte" : ""}`
-                    : "Připraveno k nahrávání"}
-                </span>
-              </div>
-              {isRecording ? <Progress value={Math.min(100, level * 180)} className="mt-5 h-2 w-full max-w-xs" aria-label="Hlasitost mikrofonu" /> : null}
-              {isRecording && segmentCount > 0 ? (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  Bezpečně uloženo částí: {segmentCount}
-                </p>
-              ) : null}
-              {platformTip && !isRecording ? (
-                <p className="mt-4 max-w-md text-xs leading-5 text-muted-foreground">{platformTip}</p>
-              ) : null}
-              {backgroundNote ? (
-                <p className="mt-3 max-w-sm text-xs leading-5 text-muted-foreground" aria-live="polite">
-                  {backgroundNote}
-                </p>
-              ) : null}
-              </div>
+                <p className="footnote mt-3">{isRecording ? "Klepnutím nahrávání ukončíte" : "Klepnutím začnete nahrávat"}</p>
 
-              <aside id="settings" className="scroll-mt-24 border-t border-border bg-muted/35 p-5 sm:p-7 lg:border-l lg:border-t-0">
-              <div className="flex items-center gap-2"><Settings2 className="size-4 text-primary" aria-hidden="true" /><h2 className="font-display text-base font-semibold text-foreground">Před nahráváním</h2></div>
-              <div className="mt-5 space-y-5">
-                <div className="space-y-2">
-                  <label htmlFor="language" className="text-sm font-medium text-foreground">Jazyk rozhovoru</label>
-                  <Select value={language} onValueChange={setLanguage} disabled={isRecording}>
-                    <SelectTrigger id="language" className="h-11 bg-background"><SelectValue /></SelectTrigger>
-                    <SelectContent>{LANGS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="recording-folder" className="text-sm font-medium text-foreground">Uložit do složky</label>
-                  <Select
-                    value={recordingGroup}
-                    onValueChange={(value) => {
-                      setRecordingGroup(value);
-                      localStorage.setItem(ACTIVE_GROUP_KEY, value);
-                    }}
-                    disabled={isRecording}
+                {platformTip && !isRecording ? (
+                  <p className="footnote mt-6 max-w-sm text-center">{platformTip}</p>
+                ) : null}
+                {backgroundNote ? (
+                  <p
+                    className="mt-4 max-w-sm rounded-xl bg-warning/12 px-3 py-2 text-center text-[0.8125rem] leading-5 text-foreground"
+                    aria-live="polite"
                   >
-                    <SelectTrigger id="recording-folder" className="h-11 bg-background"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="none">Bez složky</SelectItem>{groups.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <p className="text-xs leading-5 text-muted-foreground">Nová nahrávka se uloží rovnou do vybrané složky.</p>
+                    {backgroundNote}
+                  </p>
+                ) : null}
+              </div>
+
+              {showOnboarding ? (
+                <div className="grouped mt-6 animate-sheet-in" role="region" aria-labelledby="onboarding-title">
+                  <div className="flex items-start justify-between gap-3 px-4 pb-1 pt-4">
+                    <h2 id="onboarding-title" className="headline text-foreground">Jak to funguje</h2>
+                    <button
+                      type="button"
+                      className="press -mr-2 -mt-2 grid size-11 place-items-center rounded-full text-muted-foreground hover:bg-fill"
+                      aria-label="Skrýt průvodce a příště nezobrazovat"
+                      onClick={dismissOnboarding}
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                  {[
+                    { icon: Mic, tint: "bg-record", title: "Spusťte nahrávání", text: "Klepněte na červené tlačítko." },
+                    { icon: Radio, tint: "bg-warning", title: "Klidně zamkněte telefon", text: "Přechod na pozadí nahrávku neukončí." },
+                    { icon: Library, tint: "bg-primary", title: "Výsledek je v Knihovně", text: "Přepis, shrnutí, překlad i export." },
+                  ].map(({ icon: Icon, tint, title, text }) => (
+                    <div key={title} className="grouped-row flex items-center gap-3 px-4 py-3 [--row-inset:3.75rem]">
+                      <span className={`grid size-8 shrink-0 place-items-center rounded-[0.5rem] text-white ${tint}`}>
+                        <Icon className="size-4" aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[0.9375rem] font-medium text-foreground">{title}</span>
+                        <span className="footnote block">{text}</span>
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              ) : null}
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*,video/webm,video/mp4"
-                className="sr-only"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (file) void importFile(file);
-                }}
-              />
-              <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground"><span className="h-px flex-1 bg-border" /><span>nebo</span><span className="h-px flex-1 bg-border" /></div>
-              <Button
-                variant="outline"
-                className="min-h-12 w-full bg-background"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isRecording}
-              >
-                <Upload aria-hidden="true" /> Importovat zvuk
-              </Button>
-              <p className="mt-2 text-center text-xs text-muted-foreground">MP3, WAV, M4A a další · až 2 hodiny (max. 300 MB)</p>
-              <div className="mt-5 flex items-start gap-2 border-t border-border pt-5 text-xs leading-5 text-muted-foreground">
-                {syncing ? <CloudUpload className="mt-0.5 size-4 shrink-0 animate-pulse" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />}
-                <span>{user ? (syncing ? "Synchronizuji vaše záznamy…" : "Záznamy jsou dostupné na vašich zařízeních.") : "Bez přihlášení zůstanou záznamy pouze v tomto zařízení."}</span>
-              </div>
-              </aside>
-            </div>
-          </section>
-
-        ) : null}
-
-        {mode === "recorder" ? (
-          <section className="mx-auto mt-7 max-w-3xl" aria-label="Aktuální zpracování">
-            {processingRecordings.length > 0 ? (
-              <div className="rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <Loader2 className="size-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
-                    <div>
-                      <h2 className="font-display text-sm font-semibold text-foreground">Zpracování nahrávky</h2>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {(() => {
-                          const first = processingRecordings[0];
-                          const stage = first?.stage;
-                          const label =
-                            stage === "prepare"
-                              ? "Připravuji zvuk…"
-                                : stage === "upload"
-                                  ? "Ukládám zvuk do cloudu…"
-                                : stage === "transcribe"
+              {processingRecordings.length > 0 ? (
+                <Link
+                  to="/transcripts"
+                  className="grouped tap-row mt-6 flex items-center gap-3 px-4 py-3.5 animate-sheet-in"
+                  aria-label="Zpracování nahrávky – otevřít knihovnu"
+                >
+                  <Loader2 className="size-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[0.9375rem] font-medium text-foreground">Zpracování nahrávky</span>
+                    <span className="footnote block truncate">
+                      {(() => {
+                        const first = processingRecordings[0];
+                        const stage = first?.stage;
+                        const label =
+                          stage === "prepare"
+                            ? "Připravuji zvuk…"
+                            : stage === "upload"
+                              ? "Ukládám zvuk do cloudu…"
+                              : stage === "transcribe"
                                 ? "Přepisuji zvuk…"
                                 : stage === "refine"
                                   ? "Upravuji češtinu…"
                                   : stage === "summary"
-                                    ? "Tvořím AI shrnutí…"
+                                    ? "Tvořím shrnutí…"
                                     : stage === "translate"
                                       ? "Překládám…"
                                       : first?.status === "running"
                                         ? "Přepisuji zvuk…"
                                         : first?.refineStatus === "running"
                                           ? "Upravuji češtinu…"
-                                          : "Tvořím AI shrnutí…";
-                          const detail = first?.stageDetail;
-                          return detail ? `${label} část ${detail}` : label;
-                        })()}
-                      </p>
-                    </div>
-                  </div>
-                  <Badge variant="secondary">{processingCount}</Badge>
+                                          : "Tvořím shrnutí…";
+                        const detail = first?.stageDetail;
+                        return detail ? `${label} část ${detail}` : label;
+                      })()}
+                    </span>
+                    <Progress value={processingRecordings[0]?.progress ?? 10} className="mt-2 h-1" aria-label="Průběh zpracování" />
+                  </span>
+                  {processingCount > 1 ? (
+                    <span className="rounded-full bg-fill px-2 py-0.5 text-xs font-semibold text-muted-foreground">{processingCount}</span>
+                  ) : null}
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                </Link>
+              ) : null}
+            </section>
+
+            {/* Nastavení před nahráváním jako seskupený seznam */}
+            <aside id="settings" className="scroll-mt-24 space-y-6 lg:pt-[3.75rem]" aria-label="Nastavení nahrávání">
+              <div>
+                <h2 className="section-label mb-1.5">Před nahráváním</h2>
+                <div className="grouped">
+                  <label className="grouped-row flex min-h-11 items-center gap-3 pl-4 pr-1 [--row-inset:3.75rem]" htmlFor="language">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-[0.4375rem] bg-primary text-white">
+                      <Languages className="size-4" aria-hidden="true" />
+                    </span>
+                    <span className="flex-1 text-[1.0625rem] text-foreground">Jazyk</span>
+                    <Select value={language} onValueChange={setLanguage} disabled={isRecording}>
+                      <SelectTrigger
+                        id="language"
+                        className="h-11 w-auto gap-1 border-0 bg-transparent pr-3 text-[1.0625rem] text-muted-foreground shadow-none focus-visible:ring-0"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>{LANGS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </label>
+                  <label className="grouped-row flex min-h-11 items-center gap-3 pl-4 pr-1 [--row-inset:3.75rem]" htmlFor="recording-folder">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-[0.4375rem] bg-warning text-white">
+                      <Folder className="size-4" aria-hidden="true" />
+                    </span>
+                    <span className="flex-1 text-[1.0625rem] text-foreground">Složka</span>
+                    <Select
+                      value={recordingGroup}
+                      onValueChange={(value) => {
+                        setRecordingGroup(value);
+                        localStorage.setItem(ACTIVE_GROUP_KEY, value);
+                      }}
+                      disabled={isRecording}
+                    >
+                      <SelectTrigger
+                        id="recording-folder"
+                        className="h-11 w-auto max-w-44 gap-1 border-0 bg-transparent pr-3 text-[1.0625rem] text-muted-foreground shadow-none focus-visible:ring-0"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Bez složky</SelectItem>
+                        {groups.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </label>
                 </div>
-                <Progress value={processingRecordings[0]?.progress ?? 10} className="mt-4 h-1.5" aria-label="Průběh zpracování" />
+                <p className="footnote mt-1.5 px-4">Nová nahrávka se uloží rovnou do vybrané složky.</p>
+              </div>
+
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*,video/webm,video/mp4"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) void importFile(file);
+                  }}
+                />
+                <div className="grouped">
+                  <button
+                    type="button"
+                    className="tap-row flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left disabled:opacity-40"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isRecording}
+                  >
+                    <span className="grid size-7 shrink-0 place-items-center rounded-[0.4375rem] bg-success text-white">
+                      <Upload className="size-4" aria-hidden="true" />
+                    </span>
+                    <span className="flex-1 text-[1.0625rem] text-primary">Importovat zvuk…</span>
+                  </button>
+                </div>
+                <p className="footnote mt-1.5 px-4">MP3, WAV, M4A a další · až 2 hodiny (max. 300 MB)</p>
+              </div>
+
+              <p className="footnote flex items-start gap-2 px-4">
+                {syncing ? (
+                  <CloudUpload className="mt-0.5 size-4 shrink-0 animate-pulse" aria-hidden="true" />
+                ) : (
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />
+                )}
+                <span>
+                  {user
+                    ? syncing
+                      ? "Synchronizuji vaše záznamy…"
+                      : "Záznamy jsou dostupné na všech vašich zařízeních."
+                    : "Bez přihlášení zůstanou záznamy jen v tomto zařízení."}
+                </span>
+              </p>
+            </aside>
+          </div>
+        ) : (
+          <section id="transcripts" className="scroll-mt-24 animate-fade-in">
+            <div className={selected ? "hidden lg:block" : ""}>
+              <div className="flex items-end justify-between gap-4">
+                <h1 className="large-title text-foreground">Knihovna</h1>
+                <span className="footnote pb-1.5">
+                  {recordings.length} {recordings.length === 1 ? "nahrávka" : recordings.length >= 2 && recordings.length <= 4 ? "nahrávky" : "nahrávek"}
+                </span>
+              </div>
+
+              <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <label className="search-field relative flex h-10 items-center">
+                  <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    className="h-full w-full bg-transparent pl-8 pr-3 text-[1.0625rem] text-foreground outline-none placeholder:text-muted-foreground"
+                    placeholder="Hledat"
+                    aria-label="Hledat v nahrávkách a přepisech"
+                    type="search"
+                  />
+                </label>
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="h-10 w-auto gap-1.5 rounded-[0.625rem] border-0 bg-fill px-3 shadow-none sm:min-w-40" aria-label="Filtrovat podle data">
+                    <CalendarDays aria-hidden="true" />
+                    <span className="hidden sm:inline"><SelectValue /></span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Kdykoli</SelectItem>
+                    <SelectItem value="today">Dnes</SelectItem>
+                    <SelectItem value="week">Posledních 7 dní</SelectItem>
+                    <SelectItem value="month">Posledních 30 dní</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="segmented mt-3" role="group" aria-label="Filtrovat podle stavu">
+                {statusSegments.map((segment) => (
+                  <button
+                    key={segment.value}
+                    type="button"
+                    aria-pressed={statusFilter === segment.value}
+                    className="px-2 text-foreground"
+                    onClick={() => setStatusFilter(segment.value)}
+                  >
+                    {segment.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Složky jako kapsle */}
+              <div className="-mx-4 mt-3 flex items-center gap-2 overflow-x-auto px-4 pb-1" role="group" aria-label="Filtrovat podle složky">
+                {[{ value: "all", label: "Všechny" }, ...groups.map((g) => ({ value: g, label: g })), { value: "none", label: "Bez složky" }].map(
+                  ({ value, label }) => {
+                    const active = filter === value;
+                    const isGroup = value !== "all" && value !== "none";
+                    return (
+                      <span key={value} className="flex shrink-0 items-center">
+                        <button
+                          type="button"
+                          aria-pressed={active}
+                          className={`press inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[0.9375rem] font-medium ${
+                            active ? "bg-foreground text-background" : "bg-grouped text-foreground"
+                          }`}
+                          onClick={() => {
+                            setFilter(value);
+                            if (isGroup) {
+                              setRecordingGroup(value);
+                              localStorage.setItem(ACTIVE_GROUP_KEY, value);
+                            }
+                          }}
+                        >
+                          {isGroup ? <Folder className="size-3.5" aria-hidden="true" /> : null}
+                          {label}
+                          {isGroup ? <span className="text-xs opacity-60">{groupCounts[value] ?? 0}</span> : null}
+                        </button>
+                        {active && isGroup ? (
+                          <button
+                            type="button"
+                            className="press ml-0.5 grid size-8 place-items-center rounded-full text-destructive hover:bg-destructive/10"
+                            aria-label={`Smazat složku ${value}`}
+                            onClick={() => removeGroup(value)}
+                          >
+                            <Trash2 className="size-3.5" aria-hidden="true" />
+                          </button>
+                        ) : null}
+                      </span>
+                    );
+                  },
+                )}
+                <span className="flex h-8 shrink-0 items-center rounded-full bg-grouped pl-3 pr-1">
+                  <input
+                    value={newGroup}
+                    onChange={(e) => setNewGroup(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addGroup();
+                    }}
+                    placeholder="Nová složka"
+                    aria-label="Název nové složky"
+                    className="w-28 bg-transparent text-[0.9375rem] text-foreground outline-none placeholder:text-muted-foreground"
+                  />
+                  <button
+                    type="button"
+                    className="press grid size-7 place-items-center rounded-full text-primary hover:bg-fill disabled:opacity-40"
+                    aria-label="Přidat složku"
+                    disabled={!newGroup.trim()}
+                    onClick={addGroup}
+                  >
+                    <FolderPlus className="size-4" aria-hidden="true" />
+                  </button>
+                </span>
+              </div>
+            </div>
+
+            {visible.length === 0 && recordings.length > 0 ? (
+              <div className="mt-16 flex flex-col items-center text-center">
+                <Search className="size-10 text-muted-foreground/50" aria-hidden="true" />
+                <p className="headline mt-3 text-xl text-foreground">Žádné výsledky</p>
+                <p className="footnote mt-1">Zkuste jiný výraz, stav nebo složku.</p>
               </div>
             ) : null}
-            <div className="mt-5 flex justify-center">
-              <Button variant="ghost" className="min-h-11" asChild>
-                <Link to="/transcripts"><Library aria-hidden="true" /> Přejít do knihovny <ChevronRight aria-hidden="true" /></Link>
-              </Button>
+
+            {recordings.length === 0 ? (
+              <div className="mt-20 flex flex-col items-center text-center animate-fade-in">
+                <span className="grid size-16 place-items-center rounded-full bg-record/12 text-record">
+                  <AudioLines className="size-8" aria-hidden="true" />
+                </span>
+                <p className="mt-4 font-display text-[1.375rem] font-bold tracking-[-0.02em] text-foreground">Zatím žádné nahrávky</p>
+                <p className="footnote mt-1 max-w-xs">Po první nahrávce tu najdete zvuk, přepis, shrnutí i překlad.</p>
+                <Link
+                  to="/"
+                  className="press mt-6 inline-flex h-12 items-center gap-2 rounded-full bg-primary px-6 text-[1.0625rem] font-semibold text-primary-foreground"
+                >
+                  <Mic className="size-5" aria-hidden="true" /> Nová nahrávka
+                </Link>
+              </div>
+            ) : null}
+
+            <div className="mt-5 grid items-start gap-6 lg:grid-cols-[minmax(19rem,0.8fr)_minmax(0,1.2fr)]">
+              {visible.length > 0 ? (
+                <ul className={`grouped ${selected ? "hidden lg:block" : ""}`} aria-label="Seznam nahrávek">
+                  {visible.map((rec) => {
+                    const isProcessing = isRecordingBusy(rec);
+                    const recStatus = statusInfo(rec);
+                    const failed = recStatus.tone === "destructive";
+                    const isSelected = selectedId === rec.id;
+                    return (
+                      <li
+                        key={rec.id}
+                        className={`grouped-row [--row-inset:4rem] ${isSelected ? "bg-primary/10" : ""}`}
+                      >
+                        {editingId === rec.id ? (
+                          <div className="flex items-center gap-2 px-4 py-2.5">
+                            <Input
+                              autoFocus
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveRename(rec.id);
+                                if (e.key === "Escape") setEditingId(null);
+                              }}
+                              aria-label="Název nahrávky"
+                              className="h-10 min-w-0 flex-1 rounded-[0.625rem] border-0 bg-fill"
+                            />
+                            <Button size="sm" className="press h-10 rounded-full px-4" onClick={() => saveRename(rec.id)}>
+                              Hotovo
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center">
+                            <button
+                              type="button"
+                              className="tap-row flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 text-left"
+                              onClick={() => openRecording(rec.id)}
+                              aria-label={`Otevřít ${rec.title || "nahrávku"}`}
+                            >
+                              <span
+                                className={`grid size-9 shrink-0 place-items-center rounded-full ${
+                                  failed ? "bg-destructive/12 text-destructive" : isProcessing ? "bg-primary/12 text-primary" : "bg-record/12 text-record"
+                                }`}
+                              >
+                                {isProcessing ? (
+                                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                                ) : failed ? (
+                                  <AlertCircle className="size-4" aria-hidden="true" />
+                                ) : (
+                                  <AudioLines className="size-4" aria-hidden="true" />
+                                )}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="headline block truncate text-[1.0625rem] text-foreground">
+                                  {rec.title || new Date(rec.createdAt).toLocaleString("cs-CZ", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                                <span className="footnote flex flex-wrap items-center gap-x-1.5">
+                                  <span>{new Date(rec.createdAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" })}</span>
+                                  <span aria-hidden="true">·</span>
+                                  <span className="tabular-nums">{formatDuration(rec.duration)}</span>
+                                  {rec.group ? (
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span className="truncate">{rec.group}</span>
+                                    </>
+                                  ) : null}
+                                </span>
+                                {isProcessing || failed ? (
+                                  <span className={`mt-0.5 block text-[0.8125rem] font-medium ${failed ? "text-destructive" : "text-primary"}`}>
+                                    {isProcessing ? `${recStatus.label}…` : recStatus.label}
+                                  </span>
+                                ) : null}
+                                {isProcessing ? (
+                                  <Progress
+                                    value={
+                                      rec.uploadStatus === "running" && !rec.stage
+                                        ? (rec.uploadProgress ?? 0)
+                                        : (rec.progress ?? (rec.status === "running" ? 35 : rec.refineStatus === "running" ? 65 : 85))
+                                    }
+                                    className="mt-1.5 h-1"
+                                    aria-label="Průběh zpracování"
+                                  />
+                                ) : null}
+                              </span>
+                              <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              className="press mr-1 grid size-11 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-fill"
+                              aria-label={`Přejmenovat ${rec.title || "nahrávku"}`}
+                              onClick={() => startRename(rec)}
+                            >
+                              <Pencil className="size-4" aria-hidden="true" />
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+
+              <div id="recording-detail" className="scroll-mt-20 lg:sticky lg:top-20">
+                {selected ? (
+                  <RecordingDetail
+                    key={selected.id}
+                    recording={selected}
+                    audioUrl={audioUrls[selected.id]}
+                    onClose={() => setSelectedId(null)}
+                    onCopy={(text) => void copy(text)}
+                    onDelete={() => {
+                      remove(selected.id);
+                      setSelectedId(null);
+                    }}
+                    onExportAudio={() => void exportAudio(selected)}
+                    onExportTranscript={() => exportText(selected, "transcript")}
+                    onExportSummary={() => exportText(selected, "summary")}
+                    onExportTranslation={() => exportText(selected, "translation")}
+                    onRefreshSummary={() => void summarize(selected.transcript, selected.id)}
+                    onTogglePlayer={() => void togglePlayer(selected)}
+                    onUpdateTranscript={(text) => update(selected.id, { transcript: text, status: "done" })}
+                    onRetry={() => void retry(selected)}
+                    onTranslate={(targetLang, options) => void translate(selected, targetLang, options)}
+                  />
+                ) : visible.length > 0 ? (
+                  <div className="hidden min-h-[28rem] flex-col items-center justify-center rounded-[0.875rem] border border-dashed border-separator text-center lg:flex">
+                    <FileText className="size-10 text-muted-foreground/40" aria-hidden="true" />
+                    <p className="headline mt-3 text-foreground">Vyberte nahrávku</p>
+                    <p className="footnote mt-1 max-w-xs">Zobrazí se shrnutí, celý přepis, překlad a exporty.</p>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </section>
-        ) : (
-        <section id="transcripts" className="scroll-mt-24">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
-            <div className="min-w-0"><p className="text-sm font-medium text-primary">Knihovna</p><h1 className="truncate font-display text-3xl font-bold text-foreground">Vaše nahrávky</h1><p className="mt-1 text-sm text-muted-foreground">Najděte přepis, pokračujte ve zpracování nebo exportujte výsledek.</p></div>
-            <Badge variant="secondary">{recordings.length} {recordings.length === 1 ? "záznam" : "záznamů"}</Badge>
-          </div>
-
-          <div className="mt-6 grid gap-3 rounded-lg border border-border bg-card p-3 shadow-sm md:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <label className="relative block min-w-0">
-              <Search className="pointer-events-none absolute left-3 top-3.5 size-4 text-muted-foreground" aria-hidden="true" />
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} className="h-11 bg-card pl-9" placeholder="Hledat v názvech, přepisech a shrnutích…" aria-label="Hledat v nahrávkách a přepisech" />
-            </label>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="h-11 min-w-40 bg-background" aria-label="Filtrovat podle stavu"><SlidersHorizontal aria-hidden="true" /><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="all">Všechny stavy</SelectItem><SelectItem value="ready">Hotové</SelectItem><SelectItem value="processing">Zpracovává se</SelectItem><SelectItem value="error">S chybou</SelectItem></SelectContent>
-            </Select>
-            <Select value={dateFilter} onValueChange={setDateFilter}>
-              <SelectTrigger className="h-11 min-w-40 bg-background" aria-label="Filtrovat podle data"><CalendarDays aria-hidden="true" /><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="all">Kdykoli</SelectItem><SelectItem value="today">Dnes</SelectItem><SelectItem value="week">Posledních 7 dní</SelectItem><SelectItem value="month">Posledních 30 dní</SelectItem></SelectContent>
-            </Select>
-          </div>
-
-          <div className="mt-3 flex max-w-full items-center gap-2 overflow-x-auto pb-1" role="group" aria-label="Filtrovat podle složky">
-              <Button
-                variant={filter === "all" ? "default" : "outline"}
-                className="min-h-11 shrink-0"
-                onClick={() => setFilter("all")}
-              >
-                Vše
-              </Button>
-              {groups.map((g) => (
-                <span key={g} className="flex shrink-0 items-center">
-                  <Button
-                    variant={filter === g ? "default" : "outline"}
-                    className="min-h-11"
-                    onClick={() => {
-                      setFilter(g);
-                      setRecordingGroup(g);
-                      localStorage.setItem(ACTIVE_GROUP_KEY, g);
-                    }}
-                  >
-                    <Folder aria-hidden="true" />{g}
-                    <span className="ml-1 text-xs opacity-70">
-                      {groupCounts[g] ?? 0}
-                    </span>
-                  </Button>
-                  {filter === g && (
-                    <Button
-                      variant="ghost"
-                      size="icon" className="min-h-11 min-w-11"
-                      aria-label={`Smazat skupinu ${g}`}
-                      onClick={() => removeGroup(g)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </span>
-              ))}
-              <Button variant={filter === "none" ? "default" : "outline"} className="min-h-11 shrink-0" onClick={() => setFilter("none")}>Bez složky</Button>
-          </div>
-
-          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <Input
-                value={newGroup}
-                onChange={(e) => setNewGroup(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") addGroup();
-                }}
-                placeholder="Název nové složky"
-                aria-label="Název nové složky"
-                className="h-11 bg-card"
-              />
-              <Button variant="outline" className="min-h-11" onClick={addGroup}>
-                <FolderPlus aria-hidden="true" /> Přidat složku
-              </Button>
-          </div>
-
-          {visible.length === 0 && recordings.length > 0 && (
-            <div className="mt-5 rounded-lg border border-dashed border-border bg-card p-10 text-center"><Search className="mx-auto size-6 text-muted-foreground" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Nic jsme nenašli</p><p className="mt-1 text-sm text-muted-foreground">Zkuste jiný výraz nebo jinou složku.</p></div>
-          )}
-
-          {recordings.length === 0 && (
-            <div className="mt-6 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card p-10 text-center"><span className="grid size-14 place-items-center rounded-lg bg-secondary text-primary"><FileAudio className="size-7" aria-hidden="true" /></span><p className="mt-4 font-display text-xl font-semibold text-foreground">Zatím tu nic není</p><p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">Vytvořte první nahrávku. Po uložení se zde objeví zvuk, přepis i shrnutí.</p><Button className="mt-6 min-h-12" asChild><Link to="/"><Mic aria-hidden="true" /> Nová nahrávka</Link></Button></div>
-          )}
-
-          <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.25fr)]">
-            <div className={`space-y-2 ${selected ? "hidden lg:block" : ""}`} aria-label="Seznam nahrávek">
-            {visible.map((rec) => {
-              const isProcessing = isRecordingBusy(rec);
-              const recStatus = statusInfo(rec);
-              const failed = recStatus.tone === "destructive";
-              return (
-              <article
-                key={rec.id}
-                onClick={(event) => {
-                  // Klepnutí kamkoli na kartu otevře detail; tlačítka a pole mají vlastní akci.
-                  if ((event.target as HTMLElement).closest("button, input, a")) return;
-                  openRecording(rec.id);
-                }}
-                className={`cursor-pointer rounded-xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none ${selectedId === rec.id ? "border-primary ring-1 ring-primary/20" : "border-border hover:border-primary/50"}`}>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-                  <div className="min-w-0">
-                  {editingId === rec.id ? (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        autoFocus
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") saveRename(rec.id);
-                          if (e.key === "Escape") setEditingId(null);
-                        }}
-                        aria-label="Název nahrávky"
-                        className="h-11 min-w-0 flex-1"
-                      />
-                      <Button size="icon" className="min-h-11 min-w-11" aria-label="Uložit nový název" onClick={() => saveRename(rec.id)}>
-                        <Check aria-hidden="true" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      onClick={() => startRename(rec)}
-                      className="h-auto max-w-full justify-start gap-2 p-0 text-left hover:bg-transparent"
-                    >
-                      <span className="truncate text-sm font-medium text-foreground">
-                        {rec.title || new Date(rec.createdAt).toLocaleString("cs-CZ")}
-                      </span>
-                      <Pencil className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    </Button>
-                  )}
-                   <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                     <span className="inline-flex items-center gap-1"><CalendarDays className="size-3.5" aria-hidden="true" />{new Date(rec.createdAt).toLocaleDateString("cs-CZ", { day: "numeric", month: "short", year: "numeric" })}</span>
-                     <span className="inline-flex items-center gap-1"><Clock3 className="size-3.5" aria-hidden="true" />{formatDuration(rec.duration)}</span>{rec.group ? <span className="inline-flex items-center gap-1"><Folder className="size-3.5" aria-hidden="true" />{rec.group}</span> : null}
-                   </p>
-                  <div className="mt-3 flex items-center gap-2">
-                    {isProcessing ? <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" /> : failed ? <AlertCircle className="size-4 text-destructive" aria-hidden="true" /> : <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />}
-                    <span className={`text-xs font-medium ${failed ? "text-destructive" : "text-muted-foreground"}`}>{isProcessing ? `${recStatus.label}…` : failed ? recStatus.label : rec.translation ? "Přepis i překlad jsou připravené" : "Přepis je připravený"}</span>
-                  </div>
-                   {isProcessing ? <Progress value={rec.uploadStatus === "running" && !rec.stage ? (rec.uploadProgress ?? 0) : (rec.progress ?? (rec.status === "running" ? 35 : rec.refineStatus === "running" ? 65 : 85))} className="mt-2 h-1.5" aria-label="Průběh zpracování" /> : null}
-                </div>
-                <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`Otevřít ${rec.title || "nahrávku"}`} onClick={() => openRecording(rec.id)}><ChevronRight aria-hidden="true" /></Button>
-              </div>
-              </article>
-            )})}
-            </div>
-
-            <div id="recording-detail" className="scroll-mt-24 lg:sticky lg:top-24">
-              {selected ? (
-                <RecordingDetail
-                  key={selected.id}
-                  recording={selected}
-                  audioUrl={audioUrls[selected.id]}
-                  onClose={() => setSelectedId(null)}
-                  onCopy={(text) => void copy(text)}
-                  onDelete={() => { remove(selected.id); setSelectedId(null); }}
-                  onExportAudio={() => void exportAudio(selected)}
-                  onExportTranscript={() => exportText(selected, "transcript")}
-                  onExportSummary={() => exportText(selected, "summary")}
-                  onExportTranslation={() => exportText(selected, "translation")}
-                  onRefreshSummary={() => void summarize(selected.transcript, selected.id)}
-                  onTogglePlayer={() => void togglePlayer(selected)}
-                  onUpdateTranscript={(text) => update(selected.id, { transcript: text, status: "done" })}
-                  onRetry={() => void retry(selected)}
-                  onTranslate={(targetLang, options) => void translate(selected, targetLang, options)}
-                />
-              ) : visible.length > 0 ? (
-                <div className="hidden min-h-80 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card p-8 text-center lg:flex"><FileText className="size-8 text-primary" aria-hidden="true" /><p className="mt-3 font-medium text-foreground">Otevřete některý přepis</p><p className="mt-1 max-w-xs text-sm leading-6 text-muted-foreground">Vyberte nahrávku vlevo a zobrazí se shrnutí, celý text i všechny exporty.</p></div>
-              ) : null}
-            </div>
-          </div>
-        </section>
         )}
-      </div>
+      </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-border bg-background/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden" aria-label="Mobilní navigace">
-        <Button variant={mode === "recorder" ? "secondary" : "ghost"} className="h-14 flex-col gap-1 text-xs" asChild><Link to="/"><Mic aria-hidden="true" />Nahrávání</Link></Button>
-        <Button variant={mode === "library" ? "secondary" : "ghost"} className="h-14 flex-col gap-1 text-xs" asChild><Link to="/transcripts"><Library aria-hidden="true" />Knihovna{processingCount > 0 ? <span className="sr-only">, {processingCount} se zpracovává</span> : null}</Link></Button>
-        <Button variant="ghost" className="h-14 flex-col gap-1 text-xs" asChild><Link to="/" hash="settings" hashScrollIntoView={{ behavior: "smooth", block: "start" }}><Settings2 aria-hidden="true" />Nastavení</Link></Button>
+      {/* Tab bar ve stylu iOS */}
+      <nav
+        className="material fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 pb-[env(safe-area-inset-bottom)] shadow-[0_-0.5px_0_var(--separator)] md:hidden"
+        aria-label="Mobilní navigace"
+      >
+        {[
+          { to: "/" as const, hash: undefined, label: "Nahrát", icon: Mic, active: mode === "recorder" },
+          { to: "/transcripts" as const, hash: undefined, label: "Knihovna", icon: Library, active: mode === "library" },
+          { to: "/" as const, hash: "settings", label: "Nastavení", icon: Settings2, active: false },
+        ].map(({ to, hash, label, icon: Icon, active }) => (
+          <Link
+            key={label}
+            to={to}
+            {...(hash ? { hash, hashScrollIntoView: { behavior: "smooth" as const, block: "start" as const } } : {})}
+            aria-current={active ? "page" : undefined}
+            className={`press relative flex h-[3.25rem] flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium ${
+              active ? "text-primary" : "text-muted-foreground"
+            }`}
+          >
+            <Icon className="size-6" strokeWidth={active ? 2.2 : 1.8} aria-hidden="true" />
+            {label}
+            {label === "Knihovna" && processingCount > 0 ? (
+              <span className="absolute right-[calc(50%-1.25rem)] top-1.5 grid min-w-4 place-items-center rounded-full bg-record px-1 text-[0.625rem] font-bold leading-4 text-white">
+                {processingCount}
+                <span className="sr-only"> se zpracovává</span>
+              </span>
+            ) : null}
+          </Link>
+        ))}
       </nav>
 
-      {showBack && (
+      {showBack ? (
         <Button
           size="icon"
           aria-label="Zpět nahoru"
-          className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-4 h-11 w-11 rounded-full shadow-lg md:bottom-6 md:right-6"
+          className="material-thick press fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 size-11 rounded-full text-primary shadow-lg hover:bg-fill md:bottom-6 md:right-6"
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         >
-          <ArrowUp className="h-5 w-5" />
+          <ArrowUp className="size-5" aria-hidden="true" />
         </Button>
-      )}
+      ) : null}
 
       <AlertDialog open={pending !== null}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Uložit nahrávku?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Nahrávka je dlouhá {formatDuration(pending?.duration ?? 0)}. Uložit ji{" "}
-              {recordingGroup !== "none"
-                ? `do složky „${recordingGroup}“`
-                : "mezi nahrávky bez složky"}
-              , nebo pokračovat v nahrávání?
+        <AlertDialogContent className="max-w-[20rem] gap-0 rounded-[0.875rem] p-0 text-center">
+          <AlertDialogHeader className="px-5 pb-4 pt-5 text-center sm:text-center">
+            <AlertDialogTitle className="headline text-[1.0625rem]">Uložit nahrávku?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[0.8125rem] leading-5 text-foreground/80">
+              Nahrávka je dlouhá {formatDuration(pending?.duration ?? 0)} a uloží se{" "}
+              {recordingGroup !== "none" ? `do složky „${recordingGroup}“` : "mezi nahrávky bez složky"}.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="sm:justify-between">
-            <Button variant="ghost" onClick={discardPending}>
+          <AlertDialogFooter className="flex-col gap-0 sm:flex-col sm:space-x-0">
+            <button type="button" className="tap-row h-11 border-t border-separator text-[1.0625rem] font-semibold text-primary" onClick={savePending}>
+              Uložit
+            </button>
+            <button type="button" className="tap-row h-11 border-t border-separator text-[1.0625rem] text-primary" onClick={continuePending}>
+              Pokračovat v nahrávání
+            </button>
+            <button type="button" className="tap-row h-11 border-t border-separator text-[1.0625rem] text-destructive" onClick={discardPending}>
               Zahodit
-            </Button>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button variant="outline" onClick={continuePending}>
-                Pokračovat v nahrávání
-              </Button>
-              <Button onClick={savePending}>Uložit</Button>
-            </div>
+            </button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
-
   );
 }
