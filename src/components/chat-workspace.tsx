@@ -59,7 +59,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RecordingDetail } from "@/components/recording-detail";
+import { RecordingDetail, isRecordingBusy, statusInfo } from "@/components/recording-detail";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -1572,8 +1572,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         : "outline";
 
   return (
-    <div className="min-h-dvh bg-background pb-24 sm:pb-12">
-      <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-xl">
+    <div className="min-h-dvh bg-background pb-[calc(6rem+env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:pb-12">
+      <header className="sticky top-0 z-30 border-b border-border bg-background/90 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
         <div className="mx-auto grid min-h-[4.5rem] w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
           <Link to="/" className="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground shadow-sm"><AudioLines className="size-5" aria-hidden="true" /></span>
@@ -1883,9 +1883,18 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.25fr)]">
             <div className={`space-y-2 ${selected ? "hidden lg:block" : ""}`} aria-label="Seznam nahrávek">
             {visible.map((rec) => {
-              const isProcessing = Boolean(rec.stage) || rec.status === "running" || rec.refineStatus === "running" || rec.summaryStatus === "running" || rec.translationStatus === "running" || rec.uploadStatus === "running";
+              const isProcessing = isRecordingBusy(rec);
+              const recStatus = statusInfo(rec);
+              const failed = recStatus.tone === "destructive";
               return (
-              <article key={rec.id} className={`rounded-lg border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none ${selectedId === rec.id ? "border-primary ring-1 ring-primary/20" : "border-border hover:border-primary/50"}`}>
+              <article
+                key={rec.id}
+                onClick={(event) => {
+                  // Klepnutí kamkoli na kartu otevře detail; tlačítka a pole mají vlastní akci.
+                  if ((event.target as HTMLElement).closest("button, input, a")) return;
+                  openRecording(rec.id);
+                }}
+                className={`cursor-pointer rounded-xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none ${selectedId === rec.id ? "border-primary ring-1 ring-primary/20" : "border-border hover:border-primary/50"}`}>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
                   <div className="min-w-0">
                   {editingId === rec.id ? (
@@ -1922,10 +1931,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
                      <span className="inline-flex items-center gap-1"><Clock3 className="size-3.5" aria-hidden="true" />{formatDuration(rec.duration)}</span>{rec.group ? <span className="inline-flex items-center gap-1"><Folder className="size-3.5" aria-hidden="true" />{rec.group}</span> : null}
                    </p>
                   <div className="mt-3 flex items-center gap-2">
-                    {isProcessing ? <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" /> : rec.status === "error" ? <AlertCircle className="size-4 text-destructive" aria-hidden="true" /> : <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />}
-                    <span className={`text-xs font-medium ${rec.status === "error" ? "text-destructive" : "text-muted-foreground"}`}>{rec.status === "error" ? "Přepis selhal" : rec.status === "running" ? "Přepisuji zvuk…" : rec.refineStatus === "running" ? "Upravuji češtinu…" : rec.summaryStatus === "running" ? "Tvořím shrnutí…" : "Přepis je připravený"}</span>
+                    {isProcessing ? <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" /> : failed ? <AlertCircle className="size-4 text-destructive" aria-hidden="true" /> : <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />}
+                    <span className={`text-xs font-medium ${failed ? "text-destructive" : "text-muted-foreground"}`}>{isProcessing ? `${recStatus.label}…` : failed ? recStatus.label : rec.translation ? "Přepis i překlad jsou připravené" : "Přepis je připravený"}</span>
                   </div>
-                   {isProcessing ? <Progress value={rec.progress ?? (rec.status === "running" ? 35 : rec.refineStatus === "running" ? 65 : 85)} className="mt-2 h-1.5" aria-label="Průběh zpracování" /> : null}
+                   {isProcessing ? <Progress value={rec.uploadStatus === "running" && !rec.stage ? (rec.uploadProgress ?? 0) : (rec.progress ?? (rec.status === "running" ? 35 : rec.refineStatus === "running" ? 65 : 85))} className="mt-2 h-1.5" aria-label="Průběh zpracování" /> : null}
                 </div>
                 <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`Otevřít ${rec.title || "nahrávku"}`} onClick={() => openRecording(rec.id)}><ChevronRight aria-hidden="true" /></Button>
               </div>
@@ -1964,14 +1973,14 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
       <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-border bg-background/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden" aria-label="Mobilní navigace">
         <Button variant={mode === "recorder" ? "secondary" : "ghost"} className="h-14 flex-col gap-1 text-xs" asChild><Link to="/"><Mic aria-hidden="true" />Nahrávání</Link></Button>
         <Button variant={mode === "library" ? "secondary" : "ghost"} className="h-14 flex-col gap-1 text-xs" asChild><Link to="/transcripts"><Library aria-hidden="true" />Knihovna{processingCount > 0 ? <span className="sr-only">, {processingCount} se zpracovává</span> : null}</Link></Button>
-        <Button variant="ghost" className="h-14 flex-col gap-1 text-xs" asChild><Link to="/" hash="nastaveni"><Settings2 aria-hidden="true" />Nastavení</Link></Button>
+        <Button variant="ghost" className="h-14 flex-col gap-1 text-xs" asChild><Link to="/" hash="settings" hashScrollIntoView={{ behavior: "smooth", block: "start" }}><Settings2 aria-hidden="true" />Nastavení</Link></Button>
       </nav>
 
       {showBack && (
         <Button
           size="icon"
           aria-label="Zpět nahoru"
-          className="fixed bottom-24 right-4 h-11 w-11 rounded-full shadow-lg sm:bottom-6 sm:right-6"
+          className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-4 h-11 w-11 rounded-full shadow-lg md:bottom-6 md:right-6"
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         >
           <ArrowUp className="h-5 w-5" />

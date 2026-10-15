@@ -19,6 +19,7 @@ import {
   ArrowLeft,
   CalendarDays,
   Clock3,
+  PauseCircle,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { formatDuration } from "@/lib/wav";
+import { totalGapSeconds, type Gap } from "@/lib/recording-resilience";
 
 export type RecordingView = {
   id: string;
@@ -74,6 +76,8 @@ export type RecordingView = {
   translationParts?: string[];
   uploadProgress?: number;
   uploadStatus?: "running" | "done" | "error";
+  /** Mezery, kdy systém během nahrávání uspal mikrofon. */
+  gaps?: Gap[];
 };
 
 type Props = {
@@ -114,7 +118,18 @@ const STAGE_LABELS: Record<string, string> = {
   translate: "Překládám",
 };
 
-function statusInfo(recording: RecordingView) {
+export function isRecordingBusy(recording: RecordingView): boolean {
+  return (
+    Boolean(recording.stage) ||
+    recording.status === "running" ||
+    recording.refineStatus === "running" ||
+    recording.summaryStatus === "running" ||
+    recording.translationStatus === "running" ||
+    recording.uploadStatus === "running"
+  );
+}
+
+export function statusInfo(recording: RecordingView) {
   if (recording.status === "error") return { label: "Přepis selhal", tone: "destructive" as const };
   if (recording.uploadStatus === "error") return { label: "Cloudové uložení selhalo", tone: "destructive" as const };
   if (recording.translationStatus === "error") return { label: "Překlad selhal", tone: "destructive" as const };
@@ -171,13 +186,9 @@ export const RecordingDetail = memo(function RecordingDetail({
   const [draft, setDraft] = useState(recording.transcript);
   const [target, setTarget] = useState(recording.translationLang || "en");
   const status = statusInfo(recording);
-  const busy =
-    Boolean(recording.stage) ||
-    recording.status === "running" ||
-    recording.refineStatus === "running" ||
-    recording.summaryStatus === "running" ||
-    recording.translationStatus === "running" ||
-    recording.uploadStatus === "running";
+  const busy = isRecordingBusy(recording);
+  const gapCount = recording.gaps?.length ?? 0;
+  const gapSeconds = totalGapSeconds(recording.gaps);
 
   const saveEdit = () => {
     onUpdateTranscript(draft.trim());
@@ -206,6 +217,15 @@ export const RecordingDetail = memo(function RecordingDetail({
           <p className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1.5"><CalendarDays className="size-4" aria-hidden="true" />{new Date(recording.createdAt).toLocaleString("cs-CZ")}</span>
             <span className="inline-flex items-center gap-1.5"><Clock3 className="size-4" aria-hidden="true" />{formatDuration(recording.duration)}</span>
+            {gapCount > 0 ? (
+              <span
+                className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-300"
+                title={recording.gaps?.map((gap) => `v ${formatDuration(gap.at)}: ${gap.seconds} s`).join(", ")}
+              >
+                <PauseCircle className="size-4" aria-hidden="true" />
+                Přerušeno {gapCount === 1 ? "1×" : `${gapCount}×`}, celkem {formatDuration(gapSeconds)}
+              </span>
+            ) : null}
           </p>
         </div>
         <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="Zavřít detail" onClick={onClose}>
