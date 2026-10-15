@@ -7,7 +7,7 @@
   "compatibility_date": "2026-10-01",
   // process.env v serverovém kódu se plní z proměnných a tajných klíčů workeru.
   "compatibility_flags": ["nodejs_compat"],
-  // Veřejné údaje Supabase pro server. OPENAI_API_KEY se zadává jako tajný klíč
+  // Veřejné údaje Supabase pro server. GEMINI_API_KEY se zadává jako tajný klíč
   // (Cloudflare → Worker → Settings → Variables and Secrets), nikdy sem.
   "vars": {
     "SUPABASE_URL": "https://dglurxjmmryietkmxcku.supabase.co",

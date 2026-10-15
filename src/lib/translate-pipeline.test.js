@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { processLongText, splitText, TRANSLATE_CHUNK_CHARS } from "./pipeline";
+import { processLongText, retryDelay, splitText, TRANSLATE_CHUNK_CHARS } from "./pipeline";
 
 function sseResponse(text) {
   const body = new ReadableStream({
@@ -58,11 +58,11 @@ describe("AI překlad", () => {
     expect(result.text).toBe(parts.map((_, i) => `part${i}`).join("\n\n"));
   });
 
-  it("po dočasné chybě 429 zkusí část znovu", async () => {
+  it("po dočasné chybě 503 zkusí část znovu", async () => {
     let call = 0;
     vi.stubGlobal("fetch", async () => {
       call++;
-      return call === 1 ? errorResponse(429, "Rate limit") : sseResponse("Hello");
+      return call === 1 ? errorResponse(503, "Unavailable") : sseResponse("Hello");
     });
     const result = await processLongText("/api/translate", "Ahoj", {});
     expect(call).toBe(2);
@@ -101,5 +101,19 @@ describe("AI překlad", () => {
     const result = await processLongText("/api/translate", "", {});
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.failed).toBe(0);
+  });
+
+  it("po přetížení (429) čeká déle, aby se uvolnil limit bezplatné úrovně", () => {
+    expect(retryDelay(429, 1)).toBe(10_000);
+    expect(retryDelay(503, 1)).toBe(1500);
+    expect(retryDelay(503, 2)).toBe(3000);
+  });
+
+  it("vyčerpaný denní limit (402) neopakuje", async () => {
+    const fetchMock = vi.fn(async () => errorResponse(402, "Denní bezplatný limit Gemini je vyčerpaný."));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await processLongText("/api/translate", "Ahoj", {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.error).toBe("Denní bezplatný limit Gemini je vyčerpaný.");
   });
 });

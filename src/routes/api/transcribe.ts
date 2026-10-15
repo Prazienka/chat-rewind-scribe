@@ -1,22 +1,64 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
-  OPENAI_BASE_URL,
   clientStatus,
-  describeOpenAIError,
+  fetchGemini,
+  describeGeminiError,
+  eventStreamResponse,
+  geminiHeaders,
+  geminiKey,
   missingKeyResponse,
+  streamUrl,
+  toBase64,
+  toClientStream,
+  transcribeBody,
   transcribeModel,
-} from "@/lib/openai";
+} from "@/lib/gemini";
 
 // Klient posílá zvuk po segmentech (max ~4 minuty, 16 kHz mono ≈ 8 MB).
-// Limit je proto nastavený s rezervou, ne jako strop délky nahrávky.
-const MAX_BYTES = 30 * 1024 * 1024;
+// Gemini bere nejvýš 20 MB na požadavek a base64 zvuk zvětší asi o třetinu.
+const MAX_BYTES = 14 * 1024 * 1024;
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  cs: "čeština",
+  en: "angličtina",
+  sk: "slovenština",
+  de: "němčina",
+};
+
+const MIME_BY_EXT: Record<string, string> = {
+  wav: "audio/wav",
+  mp3: "audio/mp3",
+  m4a: "audio/m4a",
+  mp4: "audio/mp4",
+  aac: "audio/aac",
+  ogg: "audio/ogg",
+  flac: "audio/flac",
+  webm: "audio/webm",
+};
+
+const json = (status: number, error: string) =>
+  new Response(JSON.stringify({ error }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+
+function transcribePrompt(language: string | null): string {
+  const name = language ? LANGUAGE_NAMES[language] : undefined;
+  return [
+    "Přepiš řeč z přiložené nahrávky doslovně do textu.",
+    name ? `Jazyk rozhovoru: ${name}.` : "Jazyk rozpoznej sám a přepisuj v jazyce, kterým se mluví.",
+    "Zachovej všechna řečená slova v pořadí, jak zazněla; nic neshrnuj, nepřekládej a nevymýšlej.",
+    "Doplň základní interpunkci. Vrať pouze samotný přepis bez úvodu, komentářů a časových značek.",
+    "Pokud v nahrávce nikdo nemluví, vrať prázdnou odpověď.",
+  ].join("\n");
+}
 
 export const Route = createFileRoute("/api/transcribe")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const key = process.env["OPENAI_API_KEY"];
+        const key = geminiKey(process.env);
         if (!key) return missingKeyResponse();
 
         const form = await request.formData();
@@ -24,69 +66,41 @@ export const Route = createFileRoute("/api/transcribe")({
         const language = form.get("language");
 
         if (!(file instanceof File) || file.size < 2048) {
-          return new Response(
-            JSON.stringify({ error: "Nahrávka je prázdná nebo příliš krátká." }),
-            { status: 400, headers: { "Content-Type": "application/json" } },
-          );
+          return json(400, "Nahrávka je prázdná nebo příliš krátká.");
         }
         if (file.size > MAX_BYTES) {
-          return new Response(
-            JSON.stringify({ error: "Nahrávka je příliš velká. Rozdělte ji na kratší části." }),
-            { status: 413, headers: { "Content-Type": "application/json" } },
-          );
+          return json(413, "Nahrávka je příliš velká. Rozdělte ji na kratší části.");
         }
 
         const type = (file.type || "audio/wav").split(";")[0] ?? "audio/wav";
-        const extByType: Record<string, string> = {
-          "audio/wav": "wav",
-          "audio/x-wav": "wav",
-          "audio/wave": "wav",
-          "audio/webm": "webm",
-          "video/webm": "webm",
-          "audio/mp4": "mp4",
-          "audio/m4a": "m4a",
-          "audio/x-m4a": "m4a",
-          "video/mp4": "mp4",
-          "audio/mpeg": "mp3",
-          "audio/mp3": "mp3",
-          "audio/flac": "flac",
-          "audio/ogg": "ogg",
-        };
-        const nameExt = file.name.includes(".")
-          ? file.name.split(".").pop()!.toLowerCase()
-          : undefined;
-        const ext = extByType[type] ?? nameExt ?? "wav";
-        // Část služeb odmítá video/* i u čistě zvukového kontejneru.
-        const audioType = type.startsWith("video/") ? type.replace("video/", "audio/") : type;
-        const payload = new Blob([await file.arrayBuffer()], { type: audioType });
+        const nameExt = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+        // Gemini odmítá video/* i u čistě zvukového kontejneru.
+        const mimeType = type.startsWith("audio/")
+          ? type
+          : (MIME_BY_EXT[nameExt] ?? type.replace("video/", "audio/"));
 
-        const upstream = new FormData();
-        upstream.append("model", transcribeModel(process.env));
-        upstream.append("file", payload, `recording.${ext}`);
-        upstream.append("stream", "true");
-        if (typeof language === "string" && language && language !== "auto") {
-          upstream.append("language", language);
-        }
-
-        const response = await fetch(`${OPENAI_BASE_URL}/audio/transcriptions`, {
+        const response = await fetchGemini(streamUrl(transcribeModel(process.env)), {
           method: "POST",
-          headers: { Authorization: `Bearer ${key}` },
-          body: upstream,
-        });
+          headers: geminiHeaders(key),
+          body: transcribeBody(
+            toBase64(await file.arrayBuffer()),
+            mimeType,
+            transcribePrompt(typeof language === "string" && language !== "auto" ? language : null),
+          ),
+          signal: request.signal,
+        }, "Přepis");
 
+        if (response.headers.get("X-Gemini-Network-Error") || response.status === 499) return response;
         if (!response.ok || !response.body) {
           const detail = await response.text().catch(() => "");
-          console.error(`Transcription failed [${response.status}]: ${detail}`);
-          const message = describeOpenAIError(response.status, detail, "Přepis");
-          return new Response(JSON.stringify({ error: message }), {
-            status: clientStatus(response.status, detail),
-            headers: { "Content-Type": "application/json" },
-          });
+          console.error(`Transcription failed [${response.status}]: ${detail.slice(0, 500)}`);
+          return json(
+            clientStatus(response.status, detail),
+            describeGeminiError(response.status, detail, "Přepis"),
+          );
         }
 
-        return new Response(response.body, {
-          headers: { "Content-Type": "text/event-stream" },
-        });
+        return eventStreamResponse(toClientStream(response.body, "transcript"));
       },
     },
   },

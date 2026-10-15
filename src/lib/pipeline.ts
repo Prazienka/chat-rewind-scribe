@@ -54,6 +54,14 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
   }
 }
 
+/**
+ * Pauza před dalším pokusem. Bezplatná úroveň Gemini má limit požadavků za minutu,
+ * takže po přetížení (429) čekáme déle, než se limit uvolní.
+ */
+export function retryDelay(status: number, attempt: number): number {
+  return status === 429 ? attempt * 10_000 : attempt * 1500;
+}
+
 /** Jeden segment zvuku → text. Při chybě se pokus opakuje. */
 async function transcribeChunk(
   chunk: Blob,
@@ -75,10 +83,10 @@ async function transcribeChunk(
       });
       if (!response.ok || !response.body) {
         lastError = await errorMessage(response, lastError);
-        // Chyby vstupu nemá smysl opakovat.
-        if (response.status === 400 || response.status === 413) break;
+        // Chyby vstupu, klíče a vyčerpaného denního limitu nemá smysl opakovat.
+        if ([400, 401, 402, 403, 404, 413].includes(response.status)) break;
         clearTimeout(timeout);
-        await sleep(attempt * 1500);
+        await sleep(retryDelay(response.status, attempt));
         continue;
       }
       let text = "";
@@ -222,10 +230,10 @@ async function runTextChunk(
         const serverMessage = await errorMessage(response, "");
         lastError = describeHttpFailure(response.status, serverMessage);
         // Vstupní a přístupové chyby nemá smysl opakovat.
-        if ([400, 401, 402, 403, 413].includes(response.status)) {
+        if ([400, 401, 402, 403, 404, 413].includes(response.status)) {
           return { text: "", error: lastError, terminal: true };
         }
-        await sleep(attempt * 1500);
+        await sleep(retryDelay(response.status, attempt));
         continue;
       }
       await readSse(response, (event) => {

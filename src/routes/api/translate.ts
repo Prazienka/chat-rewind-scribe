@@ -1,6 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { failureStatus, providersFromEnv, translateWithFallback } from "@/lib/translate-providers";
+import { eventStreamResponse, toClientStream } from "@/lib/gemini";
+import {
+  failureMessage,
+  failureStatus,
+  providersFromEnv,
+  translateWithFallback,
+} from "@/lib/translate-providers";
 
 /** Názvy jazyků v 2. pádě ("z češtiny", "do angličtiny"). */
 const LANG_NAMES: Record<string, string> = {
@@ -55,7 +61,7 @@ Pravidla:
 
         const providers = providersFromEnv(process.env);
         if (providers.length === 0) {
-          return json(401, "Překlad není nastavený: na serveru chybí klíč OpenAI (OPENAI_API_KEY).");
+          return json(401, "Překlad není nastavený: na serveru chybí klíč Gemini (GEMINI_API_KEY).");
         }
 
         let result: Awaited<ReturnType<typeof translateWithFallback>>;
@@ -68,18 +74,13 @@ Pravidla:
           return new Response(null, { status: 499 });
         }
         if (result.ok) {
-          return new Response(result.response.body, {
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache, no-transform",
-              "X-Translate-Provider": result.provider,
-            },
+          return eventStreamResponse(toClientStream(result.response.body!, "text"), {
+            "X-Translate-Model": result.model,
           });
         }
 
-        // Selhali všichni poskytovatelé – vrátíme konkrétní důvody.
-        const message = `Překlad se nepodařil. ${result.failures.map((f) => f.message).join(" ")}`;
-        return json(failureStatus(result.failures), message);
+        // Selhaly všechny modely – vrátíme konkrétní důvod.
+        return json(failureStatus(result.failures), failureMessage(result.failures));
       },
     },
   },

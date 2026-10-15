@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  failureMessage,
   failureStatus,
   providersFromEnv,
   translateWithFallback,
@@ -10,7 +11,9 @@ const stream = () =>
   new Response(
     new ReadableStream({
       start(controller) {
-        controller.enqueue(new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"Hi"}\n\n'));
+        controller.enqueue(
+          new TextEncoder().encode('data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}\n\n'),
+        );
         controller.close();
       },
     }),
@@ -26,46 +29,48 @@ const options = (fetchImpl) => ({
 });
 
 const BOTH = providersFromEnv({
-  OPENAI_API_KEY: "sk-test",
-  OPENAI_TEXT_MODEL: "gpt-5-mini",
-  OPENAI_FALLBACK_MODEL: "gpt-4.1-mini",
+  GEMINI_API_KEY: "test-key",
+  GEMINI_TEXT_MODEL: "gemini-main",
+  GEMINI_FALLBACK_MODEL: "gemini-lite",
 });
 
-const modelOf = (init) => JSON.parse(String(init.body)).model;
+const modelOf = (url) => (String(url).includes("gemini-main") ? "main" : "lite");
 
-describe("překlad – záložní model", () => {
-  it("bez klíče OpenAI nemá s čím překládat", () => {
+describe("překlad – záložní model Gemini", () => {
+  it("bez klíče Gemini nemá s čím překládat", () => {
     expect(providersFromEnv({})).toEqual([]);
   });
 
   it("hlavní model má přednost, záložní je druhý", () => {
-    expect(BOTH.map((p) => p.model)).toEqual(["gpt-5-mini", "gpt-4.1-mini"]);
+    expect(BOTH.map((p) => p.model)).toEqual(["gemini-main", "gemini-lite"]);
   });
 
-  it("parametr reasoning posílá jen modelům, které ho umí", async () => {
-    const bodies = [];
-    const fetchImpl = vi.fn(async (_url, init) => {
-      bodies.push(JSON.parse(String(init.body)));
-      return modelOf(init) === "gpt-5-mini" ? failure(404) : stream();
+  it("posílá klíč v hlavičce, ne v adrese", async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url: String(url), headers: init.headers });
+      return stream();
     });
     await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
-    expect(bodies[0].reasoning).toEqual({ effort: "low" });
-    expect(bodies[1].reasoning).toBeUndefined();
+    expect(calls[0].url).toContain("models/gemini-main:streamGenerateContent?alt=sse");
+    expect(calls[0].url).not.toContain("test-key");
+    expect(calls[0].headers["x-goog-api-key"]).toBe("test-key");
   });
 
-  it("když hlavní model selže, odpoví záložní", async () => {
-    const fetchImpl = vi.fn(async (_url, init) =>
-      modelOf(init) === "gpt-5-mini" ? failure(403) : stream(),
-    );
+  it("když hlavní model chybí, odpoví záložní", async () => {
+    const fetchImpl = vi.fn(async (url) => (modelOf(url) === "main" ? failure(404) : stream()));
     const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
     expect(result.ok).toBe(true);
     expect(result.provider).toBe("fallback");
+    expect(result.model).toBe("gemini-lite");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("dočasnou chybu zkusí u stejného modelu znovu", async () => {
+  it("přetížení (429) zkusí u stejného modelu znovu", async () => {
     let calls = 0;
-    const fetchImpl = vi.fn(async () => (++calls === 1 ? failure(503) : stream()));
+    const fetchImpl = vi.fn(async () =>
+      ++calls === 1 ? failure(429, '{"error":{"status":"RESOURCE_EXHAUSTED"}}') : stream(),
+    );
     const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
     expect(result.ok).toBe(true);
     expect(result.provider).toBe("primary");
@@ -73,8 +78,8 @@ describe("překlad – záložní model", () => {
   });
 
   it("výpadek sítě u hlavního modelu přepne na záložní", async () => {
-    const fetchImpl = vi.fn(async (_url, init) => {
-      if (modelOf(init) === "gpt-5-mini") throw new TypeError("fetch failed");
+    const fetchImpl = vi.fn(async (url) => {
+      if (modelOf(url) === "main") throw new TypeError("fetch failed");
       return stream();
     });
     const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
@@ -82,16 +87,26 @@ describe("překlad – záložní model", () => {
     expect(result.provider).toBe("fallback");
   });
 
-  it("vyčerpaný kredit se neopakuje a hlásí se jako 402", async () => {
-    const fetchImpl = vi.fn(async () => failure(429, '{"error":{"code":"insufficient_quota"}}'));
+  it("vyčerpaný denní limit se neopakuje a hlásí se jako 402", async () => {
+    const daily = '{"error":{"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded: GenerateRequestsPerDayPerProjectPerModel-FreeTier"}}';
+    const fetchImpl = vi.fn(async () => failure(429, daily));
     const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
     expect(result.ok).toBe(false);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(result.failures.map((f) => f.message)).toEqual([
-      "OpenAI: došel kredit.",
-      "OpenAI (záložní model): došel kredit.",
-    ]);
     expect(failureStatus(result.failures)).toBe(402);
+    // Stejný důvod u obou modelů se v hlášce neopakuje.
+    expect(failureMessage(result.failures)).toBe(
+      "Překlad se nepodařil. Denní bezplatný limit Gemini je vyčerpaný. Zkuste to zítra, nebo zapněte placenou úroveň.",
+    );
+  });
+
+  it("neplatný klíč se hlásí srozumitelně a neopakuje", async () => {
+    const fetchImpl = vi.fn(async () => failure(400, '{"error":{"message":"API key not valid. Please pass a valid API key."}}'));
+    const result = await translateWithFallback(BOTH, "přelož", "Ahoj", options(fetchImpl));
+    expect(result.ok).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(failureStatus(result.failures)).toBe(401);
+    expect(failureMessage(result.failures)).toContain("Klíč Gemini je neplatný");
   });
 
   it("zrušený požadavek už další model nevolá", async () => {

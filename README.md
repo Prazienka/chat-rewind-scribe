@@ -4,7 +4,7 @@ Webová aplikace (PWA) na nahrávání rozhovorů až do 2 hodin s AI přepisem,
 
 - **Frontend a server:** TanStack Start (React 19, Vite, Tailwind), běží na Cloudflare Workers
 - **Databáze, přihlášení, úložiště zvuku:** Supabase
-- **AI:** OpenAI (přepis `gpt-4o-transcribe`, text `gpt-5-mini`, záložní model `gpt-4.1-mini`)
+- **AI:** Google Gemini API, bezplatná úroveň (přepis i text `gemini-3.8-flash`, záložní model pro překlad `gemini-3.5-flash-lite`)
 
 ## Lokální vývoj
 
@@ -21,8 +21,10 @@ npm test
 | --- | --- | --- |
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | build | Veřejné údaje Supabase pro prohlížeč |
 | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | server | Totéž pro serverové vykreslování |
-| `OPENAI_API_KEY` | server (tajné) | Klíč OpenAI, nikdy s předponou `VITE_` |
-| `OPENAI_TEXT_MODEL`, `OPENAI_FALLBACK_MODEL`, `OPENAI_TRANSCRIBE_MODEL` | server, volitelné | Změna modelů |
+| `GEMINI_API_KEY` | server (tajné) | Klíč z [Google AI Studio](https://aistudio.google.com/apikey), nikdy s předponou `VITE_` |
+| `GEMINI_TEXT_MODEL`, `GEMINI_FALLBACK_MODEL`, `GEMINI_TRANSCRIBE_MODEL` | server, volitelné | Změna modelů |
+
+> Bezplatná úroveň Gemini má limity požadavků a Google na ní může obsah používat ke zlepšování svých produktů. Placená úroveň (zapnutí fakturace v AI Studiu) to nedělá.
 
 ## Nastavení Supabase (jednou)
 
@@ -38,6 +40,6 @@ Napojte repozitář v Cloudflare → Workers & Pages → Create → Import a rep
 - Build command: `npm run build`
 - Deploy command: `npx wrangler deploy`
 - Veřejné údaje Supabase jsou v repozitáři (`.env.production`, `vars` v `wrangler.jsonc`).
-- Jediný tajný klíč: `OPENAI_API_KEY` – Worker → Settings → Variables and Secrets → typ *Secret*.
+- Jediný tajný klíč: `GEMINI_API_KEY` – Worker → Settings → Variables and Secrets → typ *Secret*.
 
 Ruční nasazení z počítače: `npx wrangler login` a pak `npm run deploy`.

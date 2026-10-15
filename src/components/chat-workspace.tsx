@@ -580,7 +580,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         // Zdrojový jazyk server detekuje sám.
         payload: { target },
         limit: TRANSLATE_CHUNK_CHARS,
-        concurrency: 3,
+        // Bezplatná úroveň Gemini má limit požadavků za minutu.
+        concurrency: 2,
         onPartsChange: (parts) => update(rec.id, { translationParts: parts }),
         preserveInputOnFailure: false,
         ...(resume ? { initialParts: rec.translationParts } : {}),

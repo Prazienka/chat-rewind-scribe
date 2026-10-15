@@ -1,14 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
-  OPENAI_BASE_URL,
   clientStatus,
-  describeOpenAIError,
+  fetchGemini,
+  describeGeminiError,
+  eventStreamResponse,
+  geminiHeaders,
+  geminiKey,
   missingKeyResponse,
-  openaiHeaders,
-  responsesBody,
+  streamUrl,
+  textBody,
   textModel,
-} from "@/lib/openai";
+  toClientStream,
+} from "@/lib/gemini";
 
 const SYSTEM = `Jsi korektor českých přepisů mluveného slova. Dostaneš hrubý strojový přepis rozhovoru a vrátíš jeho opravenou verzi.
 
@@ -27,7 +31,7 @@ export const Route = createFileRoute("/api/refine")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const key = process.env["OPENAI_API_KEY"];
+        const key = geminiKey(process.env);
         if (!key) return missingKeyResponse();
 
         const body = (await request.json().catch(() => null)) as {
@@ -42,26 +46,25 @@ export const Route = createFileRoute("/api/refine")({
           });
         }
 
-        const response = await fetch(`${OPENAI_BASE_URL}/responses`, {
+        const response = await fetchGemini(streamUrl(textModel(process.env)), {
           method: "POST",
-          headers: openaiHeaders(key),
-          body: responsesBody(textModel(process.env), SYSTEM, text, "medium"),
+          headers: geminiHeaders(key),
+          body: textBody(SYSTEM, text),
           signal: request.signal,
-        });
+        }, "Zpřesnění přepisu");
 
+        if (response.headers.get("X-Gemini-Network-Error") || response.status === 499) return response;
         if (!response.ok || !response.body) {
           const detail = await response.text().catch(() => "");
-          console.error(`Refine failed [${response.status}]: ${detail}`);
-          const message = describeOpenAIError(response.status, detail, "Zpřesnění přepisu");
+          console.error(`Refine failed [${response.status}]: ${detail.slice(0, 500)}`);
+          const message = describeGeminiError(response.status, detail, "Zpřesnění přepisu");
           return new Response(JSON.stringify({ error: message }), {
             status: clientStatus(response.status, detail),
             headers: { "Content-Type": "application/json" },
           });
         }
 
-        return new Response(response.body, {
-          headers: { "Content-Type": "text/event-stream" },
-        });
+        return eventStreamResponse(toClientStream(response.body, "text"));
       },
     },
   },

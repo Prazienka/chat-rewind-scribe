@@ -1,15 +1,22 @@
 /**
- * Překlad přes OpenAI s automatickým přepnutím na záložní model, když hlavní
- * selže. Bez závislosti na routeru, aby šlo logiku testovat.
+ * Překlad přes Gemini s automatickým přepnutím na záložní model, když hlavní
+ * selže nebo je přetížený. Bez závislosti na routeru, aby šlo logiku testovat.
  */
 
-import { OPENAI_BASE_URL, fallbackTextModel, supportsReasoning, textModel } from "./openai";
+import {
+  describeGeminiError,
+  fallbackTextModel,
+  geminiHeaders,
+  geminiKey,
+  streamUrl,
+  textBody,
+  textModel,
+} from "./gemini";
 
 export type ProviderName = "primary" | "fallback";
 
 export type Provider = {
   name: ProviderName;
-  url: string;
   key: string;
   model: string;
 };
@@ -17,45 +24,46 @@ export type Provider = {
 export type ProviderFailure = { provider: ProviderName; status: number; message: string };
 
 export type FallbackResult =
-  | { ok: true; provider: ProviderName; response: Response }
+  | { ok: true; provider: ProviderName; model: string; response: Response }
   | { ok: false; failures: ProviderFailure[] };
 
 type Options = {
   signal: AbortSignal;
   fetchImpl?: typeof fetch;
-  /** Jak dlouho čekáme na začátek odpovědi jednoho poskytovatele. */
+  /** Jak dlouho čekáme na začátek odpovědi jednoho modelu. */
   connectTimeoutMs?: number;
   attemptsPerProvider?: number;
-  /** Pauza mezi pokusy u stejného poskytovatele (ms podle čísla pokusu). */
+  /** Pauza mezi pokusy u stejného modelu (ms podle čísla pokusu). */
   backoff?: (attempt: number) => number;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Hlavní a záložní model OpenAI. Bez klíče není s čím překládat. */
+/** Hlavní a záložní model Gemini. Bez klíče není s čím překládat. */
 export function providersFromEnv(env: Record<string, string | undefined>): Provider[] {
-  const key = env["OPENAI_API_KEY"];
+  const key = geminiKey(env);
   if (!key) return [];
-  const url = `${OPENAI_BASE_URL}/responses`;
   const primary = textModel(env);
   const fallback = fallbackTextModel(env);
-  const providers: Provider[] = [{ name: "primary", url, key, model: primary }];
-  if (fallback && fallback !== primary) providers.push({ name: "fallback", url, key, model: fallback });
+  const providers: Provider[] = [{ name: "primary", key, model: primary }];
+  if (fallback && fallback !== primary) providers.push({ name: "fallback", key, model: fallback });
   return providers;
 }
 
-export function describeFailure(provider: ProviderName, status: number, detail: string): string {
-  const who = provider === "primary" ? "OpenAI" : "OpenAI (záložní model)";
-  if (status === 0) return `${who}: neodpovídá (vypršel čas).`;
-  if (status === 401) return `${who}: neplatný nebo chybějící klíč.`;
-  if (status === 402 || /insufficient_quota|billing|credit/i.test(detail)) {
-    return `${who}: došel kredit.`;
-  }
-  if (status === 403) return `${who}: přístup odmítnut.`;
-  if (status === 429) return `${who}: příliš mnoho požadavků.`;
-  if (status >= 500) return `${who}: služba je dočasně nedostupná.`;
-  return `${who}: chyba ${status}.`;
+export function describeFailure(_provider: ProviderName, status: number, detail: string): string {
+  if (status === 0) return "Gemini neodpovídá (vypršel čas).";
+  return describeGeminiError(status, detail, "Překlad");
 }
+
+/** Jedna srozumitelná hláška ze všech selhání (stejné důvody se neopakují). */
+export function failureMessage(failures: ProviderFailure[]): string {
+  const reasons = [...new Set(failures.map((f) => f.message))];
+  return `Překlad se nepodařil. ${reasons.join(" ")}`;
+}
+
+/** Denní limit bezplatné úrovně se opakováním nespraví. */
+const DAILY_LIMIT = /per day|PerDay/i;
+const INVALID_KEY = /API key not valid|API_KEY_INVALID/i;
 
 async function callProvider(
   provider: Provider,
@@ -73,46 +81,37 @@ async function callProvider(
     message: describeFailure(provider.name, 0, ""),
   };
   for (let attempt = 1; attempt <= options.attemptsPerProvider; attempt++) {
-    // Klient už odešel – nemá smysl platit za další volání.
+    // Klient už odešel – nemá smysl volat další model.
     signal.throwIfAborted();
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort);
     const timer = setTimeout(abort, options.connectTimeoutMs);
     try {
-      const response = await fetchImpl(provider.url, {
+      const response = await fetchImpl(streamUrl(provider.model), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${provider.key}`,
-        },
-        body: JSON.stringify({
-          model: provider.model,
-          stream: true,
-          store: false,
-          ...(supportsReasoning(provider.model) ? { reasoning: { effort: "low" } } : {}),
-          instructions,
-          input: text,
-        }),
+        headers: geminiHeaders(provider.key),
+        body: textBody(instructions, text),
         signal: controller.signal,
       });
       clearTimeout(timer);
       if (response.ok && response.body) return response;
       const detail = await response.text().catch(() => "");
-      console.error(`[translate] ${provider.name} ${response.status}: ${detail.slice(0, 300)}`);
+      console.error(`[translate] ${provider.model} ${response.status}: ${detail.slice(0, 300)}`);
+      const daily = response.status === 429 && DAILY_LIMIT.test(detail);
+      const invalidKey = INVALID_KEY.test(detail);
       last = {
         provider: provider.name,
-        status: response.status,
+        // Vyčerpaný denní limit hlásíme jako 402, neplatný klíč jako 401 – obojí je trvalé.
+        status: daily ? 402 : invalidKey ? 401 : response.status,
         message: describeFailure(provider.name, response.status, detail),
       };
-      // Klíč, kredit ani přístup se opakováním nespraví – rovnou zkusíme záložní model.
-      const quota = /insufficient_quota|billing/i.test(detail);
-      if (quota) last = { ...last, status: 402 };
-      if ([400, 401, 402, 403, 404].includes(response.status) || quota) return last;
+      // Klíč, přístup, model ani denní limit se opakováním nespraví – zkusíme záložní model.
+      if ([400, 401, 403, 404].includes(response.status) || daily) return last;
     } catch (error) {
       clearTimeout(timer);
       if (signal.aborted) throw error;
-      console.error(`[translate] ${provider.name} network/timeout`, error);
+      console.error(`[translate] ${provider.model} network/timeout`, error);
       last = { provider: provider.name, status: 0, message: describeFailure(provider.name, 0, "") };
     } finally {
       signal.removeEventListener("abort", abort);
@@ -123,8 +122,8 @@ async function callProvider(
 }
 
 /**
- * Zkouší poskytovatele postupně. Vrátí první úspěšnou streamovanou odpověď,
- * nebo seznam důvodů, proč selhali všichni. Zrušení klientem se propaguje jako výjimka.
+ * Zkouší modely postupně. Vrátí první úspěšnou streamovanou odpověď,
+ * nebo seznam důvodů, proč selhaly všechny. Zrušení klientem se propaguje jako výjimka.
  */
 export async function translateWithFallback(
   providers: Provider[],
@@ -137,20 +136,24 @@ export async function translateWithFallback(
     fetchImpl: options.fetchImpl ?? fetch,
     connectTimeoutMs: options.connectTimeoutMs ?? 45_000,
     attemptsPerProvider: options.attemptsPerProvider ?? 2,
-    backoff: options.backoff ?? ((attempt: number) => attempt * 1000 + Math.random() * 500),
+    backoff: options.backoff ?? ((attempt: number) => attempt * 2000 + Math.random() * 500),
   };
   const failures: ProviderFailure[] = [];
   for (const provider of providers) {
     const result = await callProvider(provider, instructions, text, settings);
-    if (result instanceof Response) return { ok: true, provider: provider.name, response: result };
+    if (result instanceof Response) {
+      return { ok: true, provider: provider.name, model: provider.model, response: result };
+    }
     failures.push(result);
   }
   return { ok: false, failures };
 }
 
-/** HTTP stav pro klienta, když selžou všichni poskytovatelé. */
+/** HTTP stav pro klienta, když selžou všechny modely. */
 export function failureStatus(failures: ProviderFailure[]): number {
   const transient = failures.some((f) => f.status === 0 || f.status === 429 || f.status >= 500);
   if (transient) return 503;
-  return failures.some((f) => f.status === 402) ? 402 : 502;
+  if (failures.some((f) => f.status === 402)) return 402;
+  if (failures.some((f) => f.status === 401 || f.status === 403)) return 401;
+  return 502;
 }
