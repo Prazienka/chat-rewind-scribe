@@ -1,12 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { eventStreamResponse, toClientStream } from "@/lib/gemini";
-import {
-  failureMessage,
-  failureStatus,
-  providersFromEnv,
-  translateWithFallback,
-} from "@/lib/translate-providers";
+import { geminiKey, textBody, textModels } from "@/lib/gemini";
+import { geminiStreamResponse } from "@/lib/gemini-fallback";
 
 /** Názvy jazyků v 2. pádě ("z češtiny", "do angličtiny"). */
 const LANG_NAMES: Record<string, string> = {
@@ -59,28 +54,18 @@ Pravidla:
 - Pokud je text už v cílovém jazyce, vrať ho beze změny.
 - Odpověz POUZE přeloženým textem.`;
 
-        const providers = providersFromEnv(process.env);
-        if (providers.length === 0) {
+        const key = geminiKey(process.env);
+        if (!key) {
           return json(401, "Překlad není nastavený: na serveru chybí klíč Gemini (GEMINI_API_KEY).");
         }
-
-        let result: Awaited<ReturnType<typeof translateWithFallback>>;
-        try {
-          result = await translateWithFallback(providers, instructions, text, {
-            signal: request.signal,
-          });
-        } catch {
-          // Klient požadavek zrušil.
-          return new Response(null, { status: 499 });
-        }
-        if (result.ok) {
-          return eventStreamResponse(toClientStream(result.response.body!, "text"), {
-            "X-Translate-Model": result.model,
-          });
-        }
-
-        // Selhaly všechny modely – vrátíme konkrétní důvod.
-        return json(failureStatus(result.failures), failureMessage(result.failures));
+        return geminiStreamResponse(
+          textModels(process.env),
+          key,
+          textBody(instructions, text),
+          "Překlad",
+          "text",
+          request,
+        );
       },
     },
   },

@@ -4,7 +4,7 @@ Webová aplikace (PWA) na nahrávání rozhovorů až do 2 hodin s AI přepisem,
 
 - **Frontend a server:** TanStack Start (React 19, Vite, Tailwind), běží na Cloudflare Workers
 - **Databáze, přihlášení, úložiště zvuku:** Supabase
-- **AI:** Google Gemini API, bezplatná úroveň (přepis i text `gemini-3.8-flash`, záložní model pro překlad `gemini-3.5-flash-lite`)
+- **AI:** Google Gemini API, bezplatná úroveň. Modely se zkoušejí postupně (`gemini-3.8-flash` → `gemini-3.6-flash` → `gemini-3.5-flash-lite`), takže přetížení jednoho modelu aplikaci nezastaví.
 
 ## Lokální vývoj
 
@@ -22,7 +22,7 @@ npm test
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | build | Veřejné údaje Supabase pro prohlížeč |
 | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | server | Totéž pro serverové vykreslování |
 | `GEMINI_API_KEY` | server (tajné) | Klíč z [Google AI Studio](https://aistudio.google.com/apikey), nikdy s předponou `VITE_` |
-| `GEMINI_TEXT_MODEL`, `GEMINI_FALLBACK_MODEL`, `GEMINI_TRANSCRIBE_MODEL` | server, volitelné | Změna modelů |
+| `GEMINI_TEXT_MODELS`, `GEMINI_TRANSCRIBE_MODELS` | server, volitelné | Vlastní pořadí modelů, oddělené čárkou |
 
 > Bezplatná úroveň Gemini má limity požadavků a Google na ní může obsah používat ke zlepšování svých produktů. Placená úroveň (zapnutí fakturace v AI Studiu) to nedělá.
 

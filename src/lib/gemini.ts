@@ -13,14 +13,25 @@ export type ServerEnv = Record<string, string | undefined>;
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 
 export const geminiKey = (env: ServerEnv) => env["GEMINI_API_KEY"];
-/** Hlavní textový model (korektura, shrnutí, překlad). */
-export const textModel = (env: ServerEnv) => env["GEMINI_TEXT_MODEL"] || "gemini-3.8-flash";
-/** Záložní, lehčí model pro překlad, když hlavní selže nebo je přetížený. */
-export const fallbackTextModel = (env: ServerEnv) =>
-  env["GEMINI_FALLBACK_MODEL"] || "gemini-3.5-flash-lite";
-/** Model pro přepis řeči (zvuk se posílá přímo v požadavku). */
-export const transcribeModel = (env: ServerEnv) =>
-  env["GEMINI_TRANSCRIBE_MODEL"] || "gemini-3.8-flash";
+
+/**
+ * Modely v pořadí, v jakém se zkoušejí. Nejnovější Flash bývá na bezplatné
+ * úrovni občas přetížený (503), proto následují dostupnější modely.
+ */
+export const DEFAULT_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+
+function modelList(value: string | undefined): string[] {
+  const list = (value ?? "")
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : DEFAULT_MODELS;
+}
+
+/** Modely pro korekturu, shrnutí a překlad (GEMINI_TEXT_MODELS, oddělené čárkou). */
+export const textModels = (env: ServerEnv) => modelList(env["GEMINI_TEXT_MODELS"]);
+/** Modely pro přepis řeči (GEMINI_TRANSCRIBE_MODELS, oddělené čárkou). */
+export const transcribeModels = (env: ServerEnv) => modelList(env["GEMINI_TRANSCRIBE_MODELS"]);
 
 export function streamUrl(model: string): string {
   return `${GEMINI_BASE_URL}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`;
@@ -166,27 +177,6 @@ export function clientStatus(status: number, detail: string): number {
   if (status === 429 && /per day|PerDay/i.test(detail)) return 402;
   if (status === 400 && /API key not valid|API_KEY_INVALID/i.test(detail)) return 401;
   return status;
-}
-
-/**
- * Zavolá Gemini a výpadek sítě převede na srozumitelnou odpověď 502
- * (klient ji zkusí znovu); zrušení klientem vrací 499.
- */
-export async function fetchGemini(
-  url: string,
-  init: RequestInit,
-  action: string,
-): Promise<Response> {
-  try {
-    return await fetch(url, init);
-  } catch (error) {
-    if ((init.signal as AbortSignal | undefined)?.aborted) return new Response(null, { status: 499 });
-    console.error(`[gemini] ${action}: network error`, error);
-    return new Response(
-      JSON.stringify({ error: `${action}: nepodařilo se spojit se službou Gemini. Zkuste to prosím znovu.` }),
-      { status: 502, headers: { "Content-Type": "application/json", "X-Gemini-Network-Error": "1" } },
-    );
-  }
 }
 
 export const missingKeyResponse = () =>

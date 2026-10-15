@@ -1,19 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
-  clientStatus,
-  fetchGemini,
-  describeGeminiError,
-  eventStreamResponse,
-  geminiHeaders,
   geminiKey,
   missingKeyResponse,
-  streamUrl,
   toBase64,
-  toClientStream,
   transcribeBody,
-  transcribeModel,
+  transcribeModels,
 } from "@/lib/gemini";
+import { geminiStreamResponse } from "@/lib/gemini-fallback";
 
 // Klient posílá zvuk po segmentech (max ~4 minuty, 16 kHz mono ≈ 8 MB).
 // Gemini bere nejvýš 20 MB na požadavek a base64 zvuk zvětší asi o třetinu.
@@ -79,28 +73,19 @@ export const Route = createFileRoute("/api/transcribe")({
           ? type
           : (MIME_BY_EXT[nameExt] ?? type.replace("video/", "audio/"));
 
-        const response = await fetchGemini(streamUrl(transcribeModel(process.env)), {
-          method: "POST",
-          headers: geminiHeaders(key),
-          body: transcribeBody(
-            toBase64(await file.arrayBuffer()),
-            mimeType,
-            transcribePrompt(typeof language === "string" && language !== "auto" ? language : null),
-          ),
-          signal: request.signal,
-        }, "Přepis");
-
-        if (response.headers.get("X-Gemini-Network-Error") || response.status === 499) return response;
-        if (!response.ok || !response.body) {
-          const detail = await response.text().catch(() => "");
-          console.error(`Transcription failed [${response.status}]: ${detail.slice(0, 500)}`);
-          return json(
-            clientStatus(response.status, detail),
-            describeGeminiError(response.status, detail, "Přepis"),
-          );
-        }
-
-        return eventStreamResponse(toClientStream(response.body, "transcript"));
+        const body = transcribeBody(
+          toBase64(await file.arrayBuffer()),
+          mimeType,
+          transcribePrompt(typeof language === "string" && language !== "auto" ? language : null),
+        );
+        return geminiStreamResponse(
+          transcribeModels(process.env),
+          key,
+          body,
+          "Přepis",
+          "transcript",
+          request,
+        );
       },
     },
   },

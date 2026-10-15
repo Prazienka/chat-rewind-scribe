@@ -1,18 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import {
-  clientStatus,
-  fetchGemini,
-  describeGeminiError,
-  eventStreamResponse,
-  geminiHeaders,
-  geminiKey,
-  missingKeyResponse,
-  streamUrl,
-  textBody,
-  textModel,
-  toClientStream,
-} from "@/lib/gemini";
+import { geminiKey, missingKeyResponse, textBody, textModels } from "@/lib/gemini";
+import { geminiStreamResponse } from "@/lib/gemini-fallback";
 
 const SYSTEM = `Jsi korektor českých přepisů mluveného slova. Dostaneš hrubý strojový přepis rozhovoru a vrátíš jeho opravenou verzi.
 
@@ -46,25 +35,14 @@ export const Route = createFileRoute("/api/refine")({
           });
         }
 
-        const response = await fetchGemini(streamUrl(textModel(process.env)), {
-          method: "POST",
-          headers: geminiHeaders(key),
-          body: textBody(SYSTEM, text),
-          signal: request.signal,
-        }, "Zpřesnění přepisu");
-
-        if (response.headers.get("X-Gemini-Network-Error") || response.status === 499) return response;
-        if (!response.ok || !response.body) {
-          const detail = await response.text().catch(() => "");
-          console.error(`Refine failed [${response.status}]: ${detail.slice(0, 500)}`);
-          const message = describeGeminiError(response.status, detail, "Zpřesnění přepisu");
-          return new Response(JSON.stringify({ error: message }), {
-            status: clientStatus(response.status, detail),
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-
-        return eventStreamResponse(toClientStream(response.body, "text"));
+        return geminiStreamResponse(
+          textModels(process.env),
+          key,
+          textBody(SYSTEM, text),
+          "Zpřesnění přepisu",
+          "text",
+          request,
+        );
       },
     },
   },
