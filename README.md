@@ -37,7 +37,7 @@ Napojte repozitář v Cloudflare → Workers & Pages → Create → Import a rep
 
 - Build command: `npm run build`
 - Deploy command: `npx wrangler deploy`
-- Proměnné pro build (Build variables): `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`
-- Proměnné a tajné klíče workeru (Settings → Variables and Secrets): `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `OPENAI_API_KEY` (jako *Secret*)
+- Veřejné údaje Supabase jsou v repozitáři (`.env.production`, `vars` v `wrangler.jsonc`).
+- Jediný tajný klíč: `OPENAI_API_KEY` – Worker → Settings → Variables and Secrets → typ *Secret*.
 
 Ruční nasazení z počítače: `npx wrangler login` a pak `npm run deploy`.

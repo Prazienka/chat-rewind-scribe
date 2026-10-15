@@ -11,5 +11,11 @@
     "directory": ".output/public",
     "binding": "ASSETS"
   },
+  // Veřejné údaje Supabase pro server. OPENAI_API_KEY se zadává jako tajný klíč
+  // (Cloudflare → Worker → Settings → Variables and Secrets), nikdy sem.
+  "vars": {
+    "SUPABASE_URL": "https://dglurxjmmryietkmxcku.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_lA2RJmUu5cUcx-0i80ywnA_5dJCk15e"
+  },
   "observability": { "enabled": true }
 }
