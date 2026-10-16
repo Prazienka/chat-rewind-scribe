@@ -71,3 +71,39 @@ export function shouldAutoResume(input: {
   if (!input.active || input.stopRequested || !input.visible) return false;
   return !input.trackLive || !input.contextRunning || input.dataStale;
 }
+
+/** Jak dlouho maximálně čekáme na uvolnění mikrofonu (hovor), než zkusíme nový stream. */
+export const MUTED_WAIT_MS = 15000;
+
+export type RecoveryAction = "none" | "ok" | "wait" | "resume";
+
+/**
+ * Co dělat se snímáním při kontrole zdraví nahrávky.
+ *  - "wait": mikrofon drží systém (hovor, Siri) – session běží dál, nic nerozebíráme.
+ *  - "resume": snímání je mrtvé a smí se znovu rozběhnout.
+ *  - "ok": vše běží; "none": nahrávání neběží nebo stránka není vidět.
+ */
+export function recoveryAction(input: {
+  active: boolean;
+  stopRequested: boolean;
+  visible: boolean;
+  trackLive: boolean;
+  trackMuted: boolean;
+  contextState: string | null;
+  dataStale: boolean;
+  /** Jak dlouho už přerušení trvá (ms). */
+  interruptedForMs: number;
+  /** Smí se teď zkusit obnova (backoff po neúspěšném pokusu)? */
+  retryAllowed: boolean;
+}): RecoveryAction {
+  if (!input.active || input.stopRequested || !input.visible) return "none";
+  const systemHolds =
+    (input.trackLive && input.trackMuted) || input.contextState === "interrupted";
+  const healthy = input.trackLive && input.contextState === "running" && !input.dataStale;
+  if (healthy && !input.trackMuted) return "ok";
+  if (systemHolds && input.interruptedForMs < MUTED_WAIT_MS) return "wait";
+  return input.retryAllowed ? "resume" : "wait";
+}
+
+/** Prodleva před dalším pokusem o obnovu po `failures` neúspěších. */
+export const retryDelayMs = (failures: number) => Math.min(15000, 2000 * 2 ** Math.max(0, failures - 1));

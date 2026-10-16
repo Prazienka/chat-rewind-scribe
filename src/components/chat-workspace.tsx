@@ -99,7 +99,13 @@ import {
   type RecordingEvent,
   type RecordingSessionState,
 } from "@/lib/recording-session";
-import { addGap, detectPlatform, type Gap } from "@/lib/recording-resilience";
+import {
+  addGap,
+  detectPlatform,
+  recoveryAction,
+  retryDelayMs,
+  type Gap,
+} from "@/lib/recording-resilience";
 
 type Recording = {
   id: string;
@@ -255,6 +261,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
   const pendingRef = useRef<{ session: string; segments: Blob[]; seconds: number } | null>(null);
   const audioUrlsRef = useRef<Record<string, string>>({});
   const lastDataAtRef = useRef(0);
+  /** Od kdy trvá přerušení (hovor apod.) a kdy smí přijít další pokus o obnovu. */
+  const interruptedAtRef = useRef<number | null>(null);
+  const recoveryFailuresRef = useRef(0);
+  const nextRetryAtRef = useRef(0);
 
   // Stav nahrávací session drží samostatný automat (src/lib/recording-session.ts),
   // aby lifecycle events nezávisely na vykreslování.
@@ -808,7 +818,17 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         await teardownGraph();
         const ctx = new AudioContext();
         ctxRef.current = ctx;
-        if (ctx.state === "suspended") await ctx.resume();
+        if (ctx.state !== "running") {
+          // Během hovoru může resume() na iOS viset – nečekáme věčně.
+          await Promise.race([
+            ctx.resume().catch(() => {}),
+            new Promise((r) => setTimeout(r, 1500)),
+          ]);
+          if ((ctx.state as string) !== "running") {
+            await teardownGraph();
+            throw Object.assign(new Error("AudioContext neběží"), { name: "AudioContextSuspended" });
+          }
+        }
         sampleRateRef.current = ctx.sampleRate;
         const source = ctx.createMediaStreamSource(stream);
         const node = ctx.createScriptProcessor(4096, 1, 1);
@@ -822,6 +842,9 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           setSegmentCount(0);
           elapsedBaseRef.current = 0;
           autoStopRequestedRef.current = false;
+          interruptedAtRef.current = null;
+          recoveryFailuresRef.current = 0;
+          nextRetryAtRef.current = 0;
           dispatchSession({
             type: "start",
             sessionId: sessionIdRef.current,
@@ -869,6 +892,8 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
           streamRef.current = null;
         }
         const name = (err as { name?: string })?.name ?? "";
+        // Při obnově po přerušení chyby neukazujeme – zkusí se to znovu za chvíli.
+        if (resume) throw err;
         const inFrame = typeof window !== "undefined" && window.self !== window.top;
         if (name === "NotAllowedError" || name === "SecurityError") {
           toast.error(
@@ -906,26 +931,27 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     try {
       await queueFlush();
       await teardownGraph();
-      gapsRef.current = addGap(gapsRef.current, lostAt, Date.now(), wavChunksDuration(segmentsRef.current));
+      const offset = wavChunksDuration(segmentsRef.current);
       // Čas navážeme na skutečně zaznamenaný zvuk, ne na hodiny na pozadí.
-      elapsedBaseRef.current = Math.max(
-        wavChunksDuration(segmentsRef.current),
-        elapsedBaseRef.current,
-      );
+      elapsedBaseRef.current = Math.max(offset, elapsedBaseRef.current);
       // Stop, který přišel během obnovy, má přednost – nahrávání už nerozbíháme.
       if (sessionRef.current.stopRequested || !activeRef.current) return;
       await start(true);
+      gapsRef.current = addGap(gapsRef.current, lostAt, Date.now(), offset);
+      recoveryFailuresRef.current = 0;
+      nextRetryAtRef.current = 0;
+      interruptedAtRef.current = null;
       dispatchSession({ type: "recovered", at: Date.now() });
-      setBackgroundNote(
-        "Nahrávání pokračuje. Části uložené před přerušením zůstaly zachované.",
-      );
+      setBackgroundNote("Nahrávání pokračuje. Části uložené před přerušením zůstaly zachované.");
     } catch {
-      dispatchSession({ type: "recovery-failed", at: Date.now(), reason: "resume-failed" });
+      // Neúspěch session NEUKONČUJE (typicky mikrofon ještě drží hovor).
+      // Watchdog to za chvíli zkusí znovu; ukončit smí jen uživatel.
+      recoveryFailuresRef.current += 1;
+      nextRetryAtRef.current = Date.now() + retryDelayMs(recoveryFailuresRef.current);
+      dispatchSession({ type: "interrupted", at: Date.now(), reason: "resume-failed" });
       setBackgroundNote(
-        "Systém nahrávání pozastavil a zatím ho nelze obnovit. Uložené části jsou v bezpečí – klepněte na Začít nahrávat pro pokračování, nebo nahrávku uložte.",
+        "Mikrofon je zatím obsazený (např. hovorem). Nahrávání se samo obnoví, jakmile se uvolní – uložené části jsou v bezpečí.",
       );
-      activeRef.current = false;
-      setIsRecording(false);
     } finally {
       recoveringRef.current = false;
     }
@@ -1027,37 +1053,81 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
         media.playbackState = "playing";
         // Stop z lock screenu je výslovná akce uživatele.
         media.setActionHandler("stop", () => void stopRef.current?.());
-        media.setActionHandler("pause", () => void stopRef.current?.());
+        // „pause“ posílá systém i při příchozím hovoru – to NENÍ pokyn k ukončení.
+        media.setActionHandler("pause", () => {
+          interruptedAtRef.current ??= Date.now();
+          dispatchSession({ type: "interrupted", at: Date.now(), reason: "system-pause" });
+          void queueFlush();
+          try {
+            media.playbackState = "playing";
+          } catch {
+            /* ignore */
+          }
+        });
       } catch {
         /* nepodporovaná akce */
       }
     }
 
-    /** Snímá zvuk skutečně dál? */
-    const capturing = () =>
-      ctxRef.current?.state === "running" &&
-      Boolean(streamRef.current?.getAudioTracks().some((t) => t.readyState === "live" && t.enabled));
+    // Posluchače na trackách navazujeme průběžně – po obnově vzniká nový stream.
+    const boundTracks = new Set<MediaStreamTrack>();
+    const bindTracks = () => {
+      for (const t of streamRef.current?.getAudioTracks() ?? []) {
+        if (boundTracks.has(t)) continue;
+        boundTracks.add(t);
+        t.addEventListener("ended", onTrackLost);
+        t.addEventListener("mute", onTrackLost);
+        t.addEventListener("unmute", onTrackBack);
+      }
+    };
 
     const healthCheck = async () => {
-      if (stoppingRef.current || sessionRef.current.stopRequested) return;
+      if (stoppingRef.current || sessionRef.current.stopRequested || !activeRef.current) return;
+      bindTracks();
+      const now = Date.now();
+      const tracks = streamRef.current?.getAudioTracks() ?? [];
+      const trackLive = tracks.some((t) => t.readyState === "live" && t.enabled);
+      const trackMuted = trackLive && tracks.every((t) => t.readyState !== "live" || t.muted);
+      const stale = isDataStale(sessionRef.current, now);
       // Watchdog: i když prohlížeč žádnou událost nepošle, poznáme, že data přestala chodit.
-      if (isDataStale(sessionRef.current, Date.now())) {
-        dispatchSession({ type: "interrupted", at: Date.now(), reason: "no-data" });
+      if (stale || trackMuted || !trackLive) {
+        interruptedAtRef.current ??= now;
+        if (sessionRef.current.phase !== "interrupted" && sessionRef.current.phase !== "recovering") {
+          dispatchSession({ type: "interrupted", at: now, reason: stale ? "no-data" : "track-lost" });
+        }
         void queueFlush();
       }
-      if (document.visibilityState !== "visible" || recoveringRef.current) return;
+      const visible = document.visibilityState === "visible";
+      if (!visible || recoveringRef.current) return;
       void requestLock();
       const ctx = ctxRef.current;
-      if (ctx && ctx.state === "suspended") {
-        try {
-          await ctx.resume();
-        } catch {
-          /* ignore */
-        }
+      if (ctx && ctx.state !== "running" && ctx.state !== "closed") {
+        await Promise.race([ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
       }
-      if (!capturing() || isDataStale(sessionRef.current, Date.now())) await resumeCapture();
-      else {
-        dispatchSession({ type: "foreground", at: Date.now() });
+      const action = recoveryAction({
+        active: activeRef.current,
+        stopRequested: sessionRef.current.stopRequested,
+        visible,
+        trackLive,
+        trackMuted,
+        contextState: ctxRef.current?.state ?? null,
+        dataStale: isDataStale(sessionRef.current, Date.now()),
+        interruptedForMs: interruptedAtRef.current ? Date.now() - interruptedAtRef.current : 0,
+        retryAllowed: Date.now() >= nextRetryAtRef.current,
+      });
+      if (action === "resume") await resumeCapture();
+      else if (action === "wait") {
+        setBackgroundNote(
+          "Nahrávání je přerušené (např. hovorem). Jakmile se mikrofon uvolní, samo pokračuje.",
+        );
+      } else if (action === "ok") {
+        interruptedAtRef.current = null;
+        recoveryFailuresRef.current = 0;
+        if (sessionRef.current.phase === "interrupted") {
+          dispatchSession({ type: "recovered", at: Date.now() });
+        } else {
+          dispatchSession({ type: "foreground", at: Date.now() });
+        }
         setBackgroundNote(null);
       }
     };
@@ -1080,17 +1150,19 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     const onPageHide = () => {
       void queueFlush();
     };
-    const onTrackLost = () => {
+    function onTrackLost() {
       // Systémové přerušení (hovor, Siri, jiná aplikace) – data držíme, session nekončí.
+      interruptedAtRef.current ??= Date.now();
       dispatchSession({ type: "interrupted", at: Date.now(), reason: "track-lost" });
       void queueFlush();
       if (document.visibilityState === "visible") void healthCheck();
-    };
-    const tracks = streamRef.current?.getAudioTracks() ?? [];
-    tracks.forEach((t) => {
-      t.addEventListener("ended", onTrackLost);
-      t.addEventListener("mute", onTrackLost);
-    });
+    }
+    function onTrackBack() {
+      // Hovor skončil, mikrofon je zpět – hned zkontrolujeme a případně obnovíme.
+      nextRetryAtRef.current = 0;
+      void healthCheck();
+    }
+    bindTracks();
     // Záložní hlídač pro platformy, které visibilitychange ani ended nepošlou.
     const watchdog = setInterval(() => void healthCheck(), 3000);
     document.addEventListener("visibilitychange", onVisibility);
@@ -1100,9 +1172,10 @@ export function ChatWorkspace({ mode }: ChatWorkspaceProps) {
     window.addEventListener("pagehide", onPageHide);
     return () => {
       clearInterval(watchdog);
-      tracks.forEach((t) => {
+      boundTracks.forEach((t) => {
         t.removeEventListener("ended", onTrackLost);
         t.removeEventListener("mute", onTrackLost);
+        t.removeEventListener("unmute", onTrackBack);
       });
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onVisibility);

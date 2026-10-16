@@ -104,3 +104,47 @@ describe("obnova nedokončené nahrávky", () => {
     expect(draft.seconds).toBe(24);
   });
 });
+
+import { MUTED_WAIT_MS, recoveryAction, retryDelayMs } from "./recording-resilience.ts";
+
+const healthy = {
+  active: true,
+  stopRequested: false,
+  visible: true,
+  trackLive: true,
+  trackMuted: false,
+  contextState: "running",
+  dataStale: false,
+  interruptedForMs: 0,
+  retryAllowed: true,
+};
+
+describe("přerušení hovorem", () => {
+  it("během hovoru (ztlumený mikrofon / přerušený AudioContext) jen čeká", () => {
+    expect(recoveryAction({ ...healthy, trackMuted: true, dataStale: true })).toBe("wait");
+    expect(recoveryAction({ ...healthy, contextState: "interrupted", dataStale: true })).toBe("wait");
+  });
+
+  it("když mikrofon zůstane ztlumený příliš dlouho, zkusí ho obnovit", () => {
+    expect(
+      recoveryAction({ ...healthy, trackMuted: true, interruptedForMs: MUTED_WAIT_MS + 1 }),
+    ).toBe("resume");
+  });
+
+  it("ukončený mikrofon obnoví, ale respektuje prodlevu po neúspěchu", () => {
+    expect(recoveryAction({ ...healthy, trackLive: false })).toBe("resume");
+    expect(recoveryAction({ ...healthy, trackLive: false, retryAllowed: false })).toBe("wait");
+  });
+
+  it("stop, pozadí a zdravé snímání nic nespouští", () => {
+    expect(recoveryAction({ ...healthy, trackLive: false, stopRequested: true })).toBe("none");
+    expect(recoveryAction({ ...healthy, trackLive: false, visible: false })).toBe("none");
+    expect(recoveryAction(healthy)).toBe("ok");
+  });
+
+  it("prodleva mezi pokusy roste a má strop", () => {
+    expect(retryDelayMs(1)).toBe(2000);
+    expect(retryDelayMs(2)).toBe(4000);
+    expect(retryDelayMs(10)).toBe(15000);
+  });
+});
